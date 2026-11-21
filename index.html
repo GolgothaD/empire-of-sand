@@ -34,7 +34,9 @@
   const ASSET_PATHS = {
     sky: 'assets/bg_sky.jpg',
     pyramids: 'assets/bg_pyramids.jpg',
-    ground: 'assets/bg_ground.jpg',
+    ground: 'assets/bg_floor.jpg',
+    pillar: 'assets/pillar.webp',
+    brazier: 'assets/brazier.webp',
     mzcookiePortrait: 'assets/portrait_mzcookie.jpg',
     thebeardPortrait: 'assets/portrait_thebeard.jpg',
     mzcookie_idle: 'assets/mzcookie_idle.png',
@@ -73,7 +75,7 @@
   // Multi-frame walk cycles (10 frames, 5x2 atlas). Frames are cut from the same painted
   // sprites; 'stride' is the distance (in 768px source units) the body travels per full cycle,
   // so the cycle phase is driven by distance actually moved and planted feet do not slide.
-  const WALK_META = {"mzcookie": {"n": 10, "cols": 5, "x0": 4, "y0": 4, "x1": 538, "y1": 768, "ax": 314.1, "ay": 759.6, "stride": 400.0, "srcH": 768}, "thebeard": {"n": 10, "cols": 5, "x0": 0, "y0": 4, "x1": 511, "y1": 768, "ax": 119.5, "ay": 759.5, "stride": 366.7, "srcH": 768}, "marauder": {"n": 10, "cols": 5, "x0": 0, "y0": 4, "x1": 487, "y1": 764, "ax": 70.1, "ay": 759.4, "stride": 466.7, "srcH": 768}, "shield": {"n": 10, "cols": 5, "x0": 0, "y0": 6, "x1": 434, "y1": 764, "ax": 275.1, "ay": 757.5, "stride": 366.7, "srcH": 768}, "zealot": {"n": 10, "cols": 5, "x0": 0, "y0": 5, "x1": 574, "y1": 768, "ax": 51.6, "ay": 758.2, "stride": 416.7, "srcH": 768}, "boss": {"n": 10, "cols": 5, "x0": 0, "y0": 0, "x1": 577, "y1": 764, "ax": 161.3, "ay": 759.2, "stride": 366.7, "srcH": 768}};
+  const WALK_META = {"mzcookie": {"n": 10, "cols": 5, "x0": 0, "y0": 0, "x1": 538, "y1": 768, "ax": 314.1, "ay": 759.6, "stride": 293.3, "srcH": 768}, "thebeard": {"n": 10, "cols": 5, "x0": 4, "y0": 4, "x1": 515, "y1": 768, "ax": 119.5, "ay": 759.5, "stride": 280.0, "srcH": 768}, "marauder": {"n": 10, "cols": 5, "x0": 0, "y0": 4, "x1": 487, "y1": 768, "ax": 70.1, "ay": 759.4, "stride": 466.7, "srcH": 768}, "shield": {"n": 10, "cols": 5, "x0": 0, "y0": 6, "x1": 434, "y1": 764, "ax": 275.1, "ay": 757.5, "stride": 366.7, "srcH": 768}, "zealot": {"n": 10, "cols": 5, "x0": 0, "y0": 5, "x1": 574, "y1": 768, "ax": 51.6, "ay": 758.2, "stride": 416.7, "srcH": 768}, "boss": {"n": 10, "cols": 5, "x0": 0, "y0": 0, "x1": 577, "y1": 768, "ax": 161.3, "ay": 759.2, "stride": 366.7, "srcH": 768}};
 
 
   const SPRITE_META = {"mzcookie_idle": {"ax": 0.5839, "ay": 0.9891}, "mzcookie_attack": {"ax": 0.3171, "ay": 0.9884}, "thebeard_idle": {"ax": 0.232, "ay": 0.9889}, "thebeard_attack": {"ax": 0.0765, "ay": 0.9858}, "marauder": {"ax": 0.1439, "ay": 0.9888}, "shield": {"ax": 0.6338, "ay": 0.9863}, "zealot": {"ax": 0.0891, "ay": 0.9873}, "boss": {"ax": 0.2795, "ay": 0.9886}, "urn": {"ax": 0.499, "ay": 0.9842}};
@@ -86,11 +88,40 @@
   const _pxs0 = _vw0 / _vh0 >= 1.2 ? _dpr0 * _vh0 / 540 : _dpr0 * _vw0 / 740;
   const BOOT_LO = 124 * _pxs0 <= 230;
   function loadAsset(key, src, counted) {
+    // Preferred path: fetch -> Blob -> ImageBitmap. No <img> element is created, so there is no
+    // large decoded image left behind for the garbage collector to reclaim mid-fight.
+    if (window.createImageBitmap && window.fetch && location.protocol !== 'file:') {
+      fetch(src).then(r => { if (!r.ok) throw 0; return r.blob(); })
+        .then(b => createImageBitmap(b))
+        .then(bm => {
+          try { bm.naturalWidth = bm.width; bm.naturalHeight = bm.height; } catch (_) {}
+          if (bm.naturalWidth !== bm.width) throw 0;
+          IMG[key] = bm; LOAD.warm.push(bm);
+          if (counted) { LOAD.done++; if (LOAD.done >= LOAD.total) LOAD.ready = true; }
+        })
+        .catch(() => loadAssetImg(key, src, counted));
+      return;
+    }
+    loadAssetImg(key, src, counted);
+  }
+  function loadAssetImg(key, src, counted) {
     const im = new Image();
     im.decoding = 'async';
-    const fin = (ok) => {
-      if (ok) { IMG[key] = im; LOAD.warm.push(im); }
+    const done = (img) => {
+      if (img) { IMG[key] = img; LOAD.warm.push(img); }
       if (counted) { LOAD.done++; if (LOAD.done >= LOAD.total) LOAD.ready = true; }
+    };
+    // Keep a fully decoded ImageBitmap so the browser never re-decodes (or decodes at a
+    // reduced scale and again later) when an enemy type first appears on screen.
+    const fin = (ok) => {
+      if (!ok) { done(null); return; }
+      if (window.createImageBitmap) {
+        createImageBitmap(im).then(bm => {
+          try { bm.naturalWidth = bm.width; bm.naturalHeight = bm.height; } catch (_) {}
+          if (bm.naturalWidth !== bm.width) { done(im); return; }
+          done(bm);
+        }, () => done(im));
+      } else done(im);
     };
     im.onerror = () => fin(false);
     im.src = src;
@@ -132,27 +163,36 @@
     _perfClock += dt;
     _frameTimes.push(dt);
     if (_frameTimes.length > 120) _frameTimes.shift();
-    if (_perfClock < 2.8 || _frameTimes.length < 50) return;
+    if (_perfClock < 1.2 || _frameTimes.length < 45) return;
+    _perfClock = 0.0001;   // evaluate once per window (not every frame), one resize at most
+    if (gameState === 'playing' && (worldTime - lastSpawnT) < 3) return;   // never resize right around a wave
     let sum = 0;
     for (let i = 0; i < _frameTimes.length; i++) sum += _frameTimes[i];
     const fps = 1 / (sum / _frameTimes.length);
     const native = window.devicePixelRatio || 1;
-    if (fps < 46 && QUALITY.dprCap > 1.15) {
-      QUALITY.dprCap = Math.max(1, Math.round((QUALITY.dprCap - 0.5) * 100) / 100);
+    const apply = () => {
       QUALITY.bloom = QUALITY.dprCap >= 1.9;
       QUALITY.particleMul = QUALITY.dprCap >= 1.6 ? 1 : 0.55;
       QUALITY.fxMul = QUALITY.dprCap >= 2 ? 1 : 0.7;
+      _frameTimes.length = 0;
       resize();
-    } else if (fps > 57 && _perfClock > 10 && QUALITY.dprCap + 0.01 < Math.min(QUALITY.maxDpr, native)) {
+    };
+    if (fps < 55 && QUALITY.dprCap > 1.05) {
+      // pixel cost ~ dpr^2: jump straight to the density that should hold ~58 fps
+      const target = QUALITY.dprCap * Math.sqrt(Math.max(0.2, fps / 62));
+      QUALITY.dprCap = Math.max(1, Math.min(QUALITY.dprCap - 0.25, Math.round(target * 20) / 20));
+      QUALITY.dropped = true;
+      apply();
+    } else if (!QUALITY.dropped && fps > 58 && worldTime > 12 && QUALITY.dprCap + 0.01 < Math.min(QUALITY.maxDpr, native)) {
       QUALITY.dprCap = Math.min(QUALITY.maxDpr, native, QUALITY.dprCap + 0.25);
-      QUALITY.bloom = QUALITY.dprCap >= 1.9;
-      QUALITY.particleMul = QUALITY.dprCap >= 1.6 ? 1 : 0.55;
-      QUALITY.fxMul = QUALITY.dprCap >= 2 ? 1 : 0.7;
-      resize();
+      apply();
     }
   }
+  let lastSpawnT = -99;
   const bloomCV = document.createElement('canvas');
   const bloomCTX = bloomCV.getContext('2d');
+  const bloomCV2 = document.createElement('canvas');
+  const bloomCTX2 = bloomCV2.getContext('2d');
 
   // =========================================================================
   // CANVAS & RESPONSIVE VIEWPORT
@@ -195,10 +235,17 @@
   const AudioFX = (() => {
     let ac = null;
     let muted = false;
+    let noiseBuf = null;
     function unlock() {
       if (muted) return;
       try {
-        if (!ac) ac = new (window.AudioContext || window.webkitAudioContext)();
+        if (!ac) {
+          ac = new (window.AudioContext || window.webkitAudioContext)();
+          const len = Math.floor(ac.sampleRate * 1.2);
+          noiseBuf = ac.createBuffer(1, len, ac.sampleRate);
+          const d = noiseBuf.getChannelData(0);
+          for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+        }
         if (ac.state === 'suspended') ac.resume();
       } catch (_) {}
     }
@@ -220,19 +267,16 @@
     function noise(dur, gainVal, lpFreq = 1200) {
       if (muted || !ac) return;
       try {
-        const len = Math.max(1, Math.floor(ac.sampleRate * dur));
-        const buf = ac.createBuffer(1, len, ac.sampleRate);
-        const data = buf.getChannelData(0);
-        for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
+        if (!noiseBuf) return;
         const src = ac.createBufferSource();
-        src.buffer = buf;
+        src.buffer = noiseBuf;
         const flt = ac.createBiquadFilter();
         flt.type = 'lowpass'; flt.frequency.value = lpFreq;
         const g = ac.createGain();
         g.gain.setValueAtTime(gainVal, ac.currentTime);
         g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
         src.connect(flt); flt.connect(g); g.connect(ac.destination);
-        src.start();
+        src.start(0, Math.random() * Math.max(0, 1.2 - dur - 0.02), dur + 0.02);
       } catch (_) {}
     }
     return {
@@ -821,13 +865,16 @@
     }
   }
 
+  let bannerDur = 1;
   function showBanner(text, dur = 2.2) {
     bannerText = text;
     bannerTimer = dur;
+    bannerDur = dur;
   }
 
   function startGame() {
     if (!LOAD.ready) return;   // art still decoding
+    bakeLateArt();
     gameState = 'playing';
     zoneIdx = 0; waveIdx = 0; zoneLocked = false; goArrowTimer = 0;
     camX = 0; score = 0; comboCount = 0; comboTimer = 0;
@@ -910,13 +957,14 @@
     } else if (type === 'boss') {
       Object.assign(base, { name: 'THE SUN COLOSSUS', hp: 460, maxHp: 460, speed: 105, reach: 128, dmg: 20, score: 1500, scale: 1.55, isBoss: true, specialCd: 3.2 });
       AudioFX.bossRoar();
-      shakeMag = 12;
+      shakeMag = 7;
       showBanner('BOSS: THE SUN COLOSSUS', 2.6);
     }
     enemies.push(base);
   }
 
   function spawnWave() {
+    lastSpawnT = worldTime;
     const z = ZONES[zoneIdx];
     const w = z.waves[waveIdx];
     for (const def of w) spawnEnemy(def.type, def.side);
@@ -947,7 +995,9 @@
   }
 
   function addSlashArc(x, y, facing, radius, color1, color2, heavy) {
-    slashArcs.push({ x, y, facing, radius, color1, color2, heavy, life: heavy ? 0.22 : 0.15, maxLife: heavy ? 0.22 : 0.15 });
+    const a = { x, y, facing, radius, color1, color2, heavy, life: heavy ? 0.22 : 0.15, maxLife: heavy ? 0.22 : 0.15 };
+    slashArcs.push(a);
+    return a;
   }
 
   // =========================================================================
@@ -991,8 +1041,17 @@
     spawnParticles(player.x, player.z - 12, 10, h.accent, 150, 3.5);
   }
 
+  // Face the direction being held (or one tapped during the previous swing) when a swing starts.
+  function applyAttackFacing() {
+    const mv = getMoveVector();
+    if (Math.abs(mv.x) > 0.3) player.facing = mv.x > 0 ? 1 : -1;
+    else if (player.wantFace && performance.now() - player.wantT < 400) player.facing = player.wantFace;
+    player.wantFace = 0;
+  }
+
   function doLight() {
     const h = getHero();
+    applyAttackFacing();
     player.comboStep = player.comboWindow > 0 ? (player.comboStep + 1) % 3 : 0;
     player.state = 'light';
     player.stateDur = h.lightDur[player.comboStep];
@@ -1000,7 +1059,7 @@
     player.comboWindow = player.stateDur + 0.38;
     player.hasHitSet.clear();
     AudioFX.swing(player.comboStep === 2);
-    addSlashArc(
+    player.arc = addSlashArc(
       player.x + player.facing * 26,
       player.z - player.y - 46,
       player.facing,
@@ -1011,6 +1070,7 @@
 
   function doHeavy() {
     const h = getHero();
+    applyAttackFacing();
     player.state = 'heavy';
     player.stateDur = h.heavyDur;
     player.stateTimer = player.stateDur;
@@ -1018,7 +1078,7 @@
     player.comboWindow = 0;
     player.hasHitSet.clear();
     AudioFX.swing(true);
-    addSlashArc(
+    player.arc = addSlashArc(
       player.x + player.facing * 32,
       player.z - player.y - 46,
       player.facing,
@@ -1026,8 +1086,9 @@
       '#fff1a8', h.accent2, true
     );
     // MzCookie heavy fires a piercing Solar Wave projectile
+    player.proj = null;
     if (player.active === 'mzcookie') {
-      projectiles.push({
+      projectiles.push(player.proj = {
         fromPlayer: true,
         x: player.x + player.facing * 42,
         z: player.z,
@@ -1249,10 +1310,28 @@
       if (player.stateTimer <= 0) player.state = 'idle';
     } else if (player.state === 'light' || player.state === 'heavy') {
       player.stateTimer -= dt;
-      player.x += player.facing * 45 * dt;
+      const prog = 1 - (player.stateTimer / Math.max(0.01, player.stateDur));
+
+      // Turn while attacking: flip during wind-up or recovery; during the strike itself the
+      // direction is buffered and applied to the next swing.
+      if (Math.abs(mv.x) > 0.3) {
+        const want = mv.x > 0 ? 1 : -1;
+        if (want !== player.facing) {
+          if (prog < 0.2 || prog > 0.74) {
+            player.facing = want;
+            const arc = player.arc;
+            if (arc && slashArcs.includes(arc)) { arc.facing = want; arc.x = player.x + want * Math.abs(arc.x - player.x); }
+            const pr = player.proj;
+            if (pr && prog < 0.2 && projectiles.includes(pr)) { pr.vx = -pr.vx; pr.x = player.x + want * 42; }
+            player.wantFace = 0;
+          } else { player.wantFace = want; player.wantT = now; }
+        } else player.wantFace = 0;
+      }
+      // lunge forward + slight steering drift
+      player.x += player.facing * 45 * dt + mv.x * h.speed * 0.22 * dt;
+      player.z += mv.y * h.speed * 0.66 * 0.3 * dt;
 
       // Active hit window
-      const prog = 1 - (player.stateTimer / Math.max(0.01, player.stateDur));
       if (prog >= 0.22 && prog <= 0.72) {
         const isHvy = player.state === 'heavy' || player.comboStep === 2;
         const dmg = player.state === 'heavy' ? h.heavyDmg : h.lightDmg[player.comboStep];
@@ -1327,14 +1406,18 @@
       camX += (targetCam - camX) * Math.min(1, dt * 7);
 
       if (zoneIdx < ZONES.length && camX >= ZONES[zoneIdx].lockX - 40) {
-        camX = ZONES[zoneIdx].lockX;
-        zoneLocked = true;
+        zoneLocked = true;   // camera keeps easing the last few px (no snap / sudden stop)
         waveIdx = 0;
         goArrowTimer = 0;
         if (!ZONES[zoneIdx].boss) showBanner(ZONES[zoneIdx].name, 2.0);
         spawnWave();
       }
     } else {
+      const lockX = ZONES[zoneIdx].lockX;
+      if (camX !== lockX) {
+        const step = (lockX - camX) * Math.min(1, dt * 5);
+        camX = Math.abs(lockX - camX) < 0.05 ? lockX : camX + step;
+      }
       const alive = enemies.some(e => e.state !== 'dead');
       if (!alive) {
         waveIdx++;
@@ -1463,7 +1546,11 @@
         if (absDx > targetDist || absDz > 24) {
           const mx = absDx > targetDist ? Math.sign(dx) : 0;
           const mz = absDz > 18 ? Math.sign(dz) : 0;
-          const entryBoost = (zoneLocked && !e.entered) ? 1.7 : 1;
+          let entryBoost = 1;
+          if (zoneLocked && !e.entered) {
+            const out = e.x < camX ? camX - e.x : e.x - (camX + W);
+            entryBoost = 1 + 0.7 * Math.max(0, Math.min(1, out / 160));
+          }
           e.x += mx * e.speed * entryBoost * dt;
           e.z += mz * (e.speed * 0.62) * dt;
         } else {
@@ -1568,54 +1655,84 @@
     }
     ctx.restore();
 
-    // 3. Midground pillars & fire braziers
-    const pillarStep = 340;
-    const firstP = Math.floor((camX * 0.65) / pillarStep) - 1;
-    for (let i = firstP; i < firstP + 7; i++) {
-      const wx = i * pillarStep - camX * 0.65;
-      ctx.drawImage(TEX.pillar, wx, LANE_TOP - 200, 74, 214);
+    // Heat shimmer: re-draw the lowest band of the vista in thin wavering strips
+    if (IMG.pyramids && IMG.pyramids.naturalWidth && QUALITY.fxMul >= 1) {
+      const im = IMG.pyramids;
+      const fracTop = 0.22, band = pyrY1 - pyrY0, aspect = im.naturalWidth / im.naturalHeight;
+      const destW = Math.max(W * 1.2, (band / (1 - fracTop)) * aspect), destH = destW / aspect;
+      const destY = Math.max(pyrY1 - destH, pyrY0 - destH * fracTop);
+      const shift = Math.min(Math.max(0, destW - W), Math.max(0, camX * 0.22));
+      const ky = im.naturalHeight / destH, kx = im.naturalWidth / destW;
+      ctx.save(); ctx.beginPath(); ctx.rect(0, pyrY0, W, pyrY1 - pyrY0); ctx.clip();
+      for (let k = 0; k < 8; k++) {
+        const y0 = pyrY1 - 46 + k * 6;
+        const dx = Math.sin(worldTime * 3.1 + k * 0.85) * 0.9;
+        ctx.drawImage(im, 0, (y0 - destY) * ky, im.naturalWidth, 6 * ky, -shift + dx, y0, destW, 6);
+      }
+      ctx.restore();
+    }
 
+    const G = layoutGradients();
+    const hasArt = BAKED.ready;
+    // 3a. Far colonnade (slow parallax, small, hazy)
+    if (hasArt) {
+      const fStep = 236, fp = 0.42, fh = 150, fw = fh * BAKED.pAspect;
+      const f0 = Math.floor((camX * fp) / fStep) - 1;
+      for (let i = f0; i < f0 + Math.ceil(W / fStep) + 3; i++) {
+        const wx = i * fStep + 60 - camX * fp;
+        ctx.drawImage(BAKED.farPillar, wx, LANE_TOP - 6 - fh, fw, fh);
+      }
+    }
+
+    // Atmospheric haze between the far vista and the colonnades
+    ctx.fillStyle = G.haze; ctx.fillRect(0, LANE_TOP - 190, W, 200);
+
+    // 3b. Midground painted colonnade + braziers
+    const pillarStep = 340, mp = 0.65;
+    const firstP = Math.floor((camX * mp) / pillarStep) - 1;
+    BRAZ.n = 0;
+    for (let i = firstP; i < firstP + Math.ceil(W / pillarStep) + 3; i++) {
+      const wx = i * pillarStep - camX * mp;
+      if (hasArt) {
+        const ph = 262, pw = ph * BAKED.pAspect;
+        ctx.drawImage(IMG.pillar, wx, LANE_TOP + 12 - ph, pw, ph);
+      } else {
+        ctx.drawImage(TEX.pillar, wx, LANE_TOP - 200, 74, 214);
+      }
       if (i % 2 === 0) {
-        const bx = wx + 90, by = LANE_TOP - 34;
-        ctx.fillStyle = '#2c1408';
-        ctx.fillRect(bx - 13, by, 26, 36);
-        ctx.fillStyle = '#6a3216';
-        ctx.fillRect(bx - 20, by - 7, 40, 10);
-        ctx.fillStyle = 'rgba(255, 210, 130, 0.35)';
-        ctx.fillRect(bx - 20, by - 7, 40, 3);
-
-        const flick = Math.sin(worldTime * 16 + i) * 6;
-        const glowR = (70 + flick) * (QUALITY.fxMul || 1);
-        const fg = ctx.createRadialGradient(bx, by - 16, 3, bx, by - 16, glowR);
-        fg.addColorStop(0, 'rgba(255, 240, 170, 0.95)');
-        fg.addColorStop(0.22, 'rgba(255, 140, 30, 0.55)');
-        fg.addColorStop(0.55, 'rgba(255, 80, 10, 0.18)');
-        fg.addColorStop(1, 'rgba(255, 40, 0, 0)');
-        ctx.fillStyle = fg;
-        ctx.beginPath(); ctx.arc(bx, by - 16, glowR, 0, Math.PI * 2); ctx.fill();
-
-        // ground light pool
-        const lg = ctx.createRadialGradient(bx, LANE_TOP + 18, 4, bx, LANE_TOP + 18, 80);
-        lg.addColorStop(0, 'rgba(255, 130, 30, 0.22)');
-        lg.addColorStop(1, 'rgba(255, 80, 10, 0)');
-        ctx.fillStyle = lg;
-        ctx.beginPath(); ctx.ellipse(bx, LANE_TOP + 20, 78, 16, 0, 0, Math.PI * 2); ctx.fill();
-
+        const bx = wx + 170, by = LANE_TOP - 46;   // bowl rim
+        if (BRAZ.n < BRAZ.x.length) BRAZ.x[BRAZ.n++] = bx;
+        if (hasArt) {
+          const bh = 104, bw = bh * BAKED.bAspect;
+          ctx.drawImage(IMG.brazier, bx - bw / 2, by - 4, bw, bh);
+        } else {
+          ctx.fillStyle = '#2c1408'; ctx.fillRect(bx - 13, by, 26, 36);
+          ctx.fillStyle = '#6a3216'; ctx.fillRect(bx - 20, by - 7, 40, 10);
+        }
+        const flick = Math.sin(worldTime * 16 + i) * 6 + Math.sin(worldTime * 7.3 + i * 2) * 3;
+        const glowR = (86 + flick) * (QUALITY.fxMul || 1);
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = 0.85;
+        ctx.drawImage(BAKED.glow, bx - glowR, by - 12 - glowR, glowR * 2, glowR * 2);
+        ctx.globalAlpha = 0.5;
+        ctx.drawImage(BAKED.glow, bx - 90, LANE_TOP + 8 - 18, 180, 36);   // light pool on the floor edge
+        ctx.restore();
         ctx.fillStyle = '#ffb03a';
         ctx.beginPath();
-        ctx.moveTo(bx - 13, by - 6);
-        ctx.quadraticCurveTo(bx - 5, by - 40 - flick, bx, by - 48 - flick);
-        ctx.quadraticCurveTo(bx + 7, by - 36, bx + 13, by - 6);
+        ctx.moveTo(bx - 15, by + 2);
+        ctx.quadraticCurveTo(bx - 6, by - 36 - flick, bx, by - 46 - flick);
+        ctx.quadraticCurveTo(bx + 8, by - 32, bx + 15, by + 2);
         ctx.fill();
         ctx.fillStyle = '#fff3b0';
         ctx.beginPath();
-        ctx.moveTo(bx - 5, by - 6);
-        ctx.quadraticCurveTo(bx, by - 28 - flick * 0.6, bx + 5, by - 6);
+        ctx.moveTo(bx - 6, by + 2);
+        ctx.quadraticCurveTo(bx, by - 24 - flick * 0.6, bx + 6, by + 2);
         ctx.fill();
       }
     }
 
-    // 4. Painted sandstone ground
+    // 4. Level paving-stone arena floor (perspective rows shrink toward the horizon)
     const gH = H - LANE_TOP + 24;
     if (IMG.ground && IMG.ground.naturalWidth) {
       const destW = gH * (IMG.ground.naturalWidth / IMG.ground.naturalHeight);
@@ -1627,19 +1744,108 @@
       }
     }
 
-    // Warm horizon glow
-    const hg = ctx.createLinearGradient(0, LANE_TOP - 70, 0, LANE_TOP + 32);
-    hg.addColorStop(0, 'rgba(255, 165, 65, 0)');
-    hg.addColorStop(0.55, 'rgba(255, 140, 45, 0.20)');
-    hg.addColorStop(1, 'rgba(255, 110, 30, 0)');
-    ctx.fillStyle = hg;
+    // Warm horizon glow + floor haze toward the back wall
+    ctx.fillStyle = G.horizon;
     ctx.fillRect(0, LANE_TOP - 70, W, 102);
+  }
+
+  // Cached gradients / pre-baked art (no per-frame canvas or gradient creation)
+  const GRAD = { key: '', haze: null, haze2: null, horizon: null, floorHaze: null };
+  function layoutGradients() {
+    const key = W + 'x' + H + ':' + LANE_TOP;
+    if (GRAD.key === key) return GRAD;
+    GRAD.key = key;
+    let g = ctx.createLinearGradient(0, LANE_TOP - 190, 0, LANE_TOP + 10);
+    g.addColorStop(0, 'rgba(255, 196, 120, 0)'); g.addColorStop(0.7, 'rgba(255, 178, 104, 0.22)'); g.addColorStop(1, 'rgba(255, 170, 96, 0.34)');
+    GRAD.haze = g;
+    g = ctx.createLinearGradient(0, LANE_TOP - 120, 0, LANE_TOP + 4);
+    g.addColorStop(0, 'rgba(255, 190, 120, 0)'); g.addColorStop(1, 'rgba(255, 175, 100, 0.26)');
+    GRAD.haze2 = g;
+    g = ctx.createLinearGradient(0, LANE_TOP - 70, 0, LANE_TOP + 32);
+    g.addColorStop(0, 'rgba(255, 165, 65, 0)'); g.addColorStop(0.55, 'rgba(255, 140, 45, 0.20)'); g.addColorStop(1, 'rgba(255, 110, 30, 0)');
+    GRAD.horizon = g;
+    g = ctx.createLinearGradient(0, LANE_TOP + 10, 0, LANE_TOP + 100);
+    g.addColorStop(0, 'rgba(255, 196, 130, 0.12)'); g.addColorStop(1, 'rgba(255, 196, 130, 0)');
+    GRAD.floorHaze = g;
+    return GRAD;
+  }
+  const BRAZ = { x: new Float32Array(16), n: 0 };
+  const BAKED = { ready: false };
+  function bakeFx() {
+    const glow = makeCanvas(128, 128), g2 = glow.getContext('2d');
+    let gr = g2.createRadialGradient(64, 64, 2, 64, 64, 64);
+    gr.addColorStop(0, 'rgba(255, 240, 170, 0.95)'); gr.addColorStop(0.22, 'rgba(255, 140, 30, 0.55)');
+    gr.addColorStop(0.55, 'rgba(255, 80, 10, 0.18)'); gr.addColorStop(1, 'rgba(255, 40, 0, 0)');
+    g2.fillStyle = gr; g2.fillRect(0, 0, 128, 128);
+    BAKED.glow = glow;
+    const sh2 = makeCanvas(96, 96), s2 = sh2.getContext('2d');
+    gr = s2.createRadialGradient(48, 48, 0, 48, 48, 48);
+    gr.addColorStop(0, 'rgba(14, 4, 1, 0.9)'); gr.addColorStop(0.55, 'rgba(14, 4, 1, 0.55)'); gr.addColorStop(1, 'rgba(14, 4, 1, 0)');
+    s2.fillStyle = gr; s2.fillRect(0, 0, 96, 96);
+    BAKED.shadow = sh2;
+  }
+  function bakeLateArt() {
+    if (BAKED.ready || !IMG.pillar || !IMG.brazier) return;
+    const pil = IMG.pillar;
+    BAKED.pAspect = pil.naturalWidth / pil.naturalHeight;
+    BAKED.bAspect = IMG.brazier.naturalWidth / IMG.brazier.naturalHeight;
+    // far colonnade: smaller, hazed toward the sky colour
+    const fw = 64, fh = Math.round(fw / BAKED.pAspect);
+    const far = makeCanvas(fw, fh), fc = far.getContext('2d');
+    fc.drawImage(pil, 0, 0, fw, fh);
+    fc.globalCompositeOperation = 'source-atop';
+    fc.fillStyle = 'rgba(236, 150, 82, 0.55)'; fc.fillRect(0, 0, fw, fh);
+    BAKED.farPillar = far;
+    // foreground stump silhouette: dark, softened (cheap blur via down/up-scale), warm rim
+    const sw = 140, sh = Math.round(sw / BAKED.pAspect);
+    const tiny = makeCanvas(Math.round(sw / 3), Math.round(sh / 3)), tc = tiny.getContext('2d');
+    tc.drawImage(pil, 0, 0, tiny.width, tiny.height);
+    tc.globalCompositeOperation = 'source-atop';
+    tc.fillStyle = 'rgb(16, 7, 3)'; tc.fillRect(0, 0, tiny.width, tiny.height);
+    const fg = makeCanvas(sw, sh), gc = fg.getContext('2d');
+    gc.imageSmoothingQuality = 'high';
+    gc.drawImage(tiny, 0, 0, sw, sh);
+    gc.globalCompositeOperation = 'source-atop';
+    const rg = gc.createLinearGradient(0, 0, sw, 0);
+    rg.addColorStop(0, 'rgba(0,0,0,0)'); rg.addColorStop(0.8, 'rgba(0,0,0,0)'); rg.addColorStop(1, 'rgba(255, 120, 40, 0.35)');
+    gc.fillStyle = rg; gc.fillRect(0, 0, sw, sh);
+    BAKED.fgStump = fg;
+    BAKED.ready = true;
+  }
+
+  // Ambient dust drifting just above the floor
+  const dust = [];
+  function initDust() {
+    dust.length = 0;
+    for (let i = 0; i < 30; i++) dust.push({ x: Math.random(), y: Math.random(), vx: 6 + Math.random() * 14, ph: Math.random() * 6.28, s: 0.8 + Math.random() * 1.8, a: 0.10 + Math.random() * 0.22 });
+  }
+  function drawDust() {
+    ctx.fillStyle = 'rgb(245, 214, 160)';
+    for (const d of dust) {
+      const x = ((d.x * (W + 40) + worldTime * d.vx - camX * 1.05) % (W + 40) + (W + 40)) % (W + 40) - 20;
+      const y = LANE_TOP + 6 + d.y * (H - LANE_TOP - 10) + Math.sin(worldTime * 0.9 + d.ph) * 6;
+      ctx.globalAlpha = d.a * (0.6 + 0.4 * Math.sin(worldTime * 1.3 + d.ph));
+      ctx.fillRect(x, y, d.s, d.s);
+    }
+    ctx.globalAlpha = 1;
   }
 
   function drawForegroundParallax() {
     const step = 760;
     const start = Math.floor((camX * 1.35) / step);
+    if (BAKED.ready) {
+      const sStep = 1180, s0 = Math.floor((camX * 1.5) / sStep) - 1;
+      for (let i = s0; i <= s0 + Math.ceil(W / sStep) + 2; i++) {
+        const fx = i * sStep + 700 - camX * 1.5;
+        const img = BAKED.fgStump, sw = 118, sh = sw * img.height / img.width;
+        // only the plinth and a broken stub of a column poke up from the bottom edge
+        ctx.globalAlpha = 0.9;
+        ctx.drawImage(img, 0, img.height * 0.70, img.width, img.height * 0.30, fx, H - sh * 0.30 + 8, sw, sh * 0.30);
+        ctx.globalAlpha = 1;
+      }
+    }
     for (let i = start; i <= start + 3; i++) {
+      if (BAKED.ready && i % 2 === 1) continue;
       const fx = i * step + 280 - camX * 1.35;
       ctx.fillStyle = 'rgba(14, 6, 3, 0.90)';
       ctx.beginPath();
@@ -1755,10 +1961,12 @@
       if (vis.fade > 0) vis.fade -= frameDt;
       if (vis.fade > 0 && vis.prev) {
         const t = 1 - vis.fade / FADE_T;
-        const base = Object.assign({}, o); base.alpha = o.alpha;
-        const ok = blitSpec(vis.prev, x, z, y, facing, drawH, base);
-        const top = Object.assign({}, o); top.alpha = (o.alpha == null ? 1 : o.alpha) * t;
-        return blitSpec(spec, x, z, y, facing, drawH, top) || ok;
+        const ok = blitSpec(vis.prev, x, z, y, facing, drawH, o);
+        const a0 = o.alpha;
+        o.alpha = (a0 == null ? 1 : a0) * t;
+        const ok2 = blitSpec(spec, x, z, y, facing, drawH, o);
+        o.alpha = a0;
+        return ok2 || ok;
       }
     }
     return blitSpec(spec, x, z, y, facing, drawH, o);
@@ -1768,11 +1976,28 @@
     return blitSpec({ k: 'rest', name }, x, z, y, facing, drawH, opts || {});
   }
 
-  function drawGroundShadow(x, z, rx, ry) {
-    ctx.fillStyle = 'rgba(16, 5, 2, 0.50)';
-    ctx.beginPath();
-    ctx.ellipse(x - camX, z + 3, rx, ry, 0, 0, Math.PI * 2);
-    ctx.fill();
+  function drawGroundShadow(x, z, rx, ry, lift) {
+    const sx = x - camX;
+    const k = Math.max(0.35, 1 - (lift || 0) / 160);   // shrinks/fades when airborne
+    if (!BAKED.shadow) {
+      ctx.fillStyle = 'rgba(16, 5, 2, 0.50)';
+      ctx.beginPath(); ctx.ellipse(sx, z + 3, rx * k, ry * k, 0, 0, Math.PI * 2); ctx.fill();
+      return;
+    }
+    // light: nearest brazier (strong, local) else the low sun from the right
+    let dir = -1, str = 0.55;
+    for (let i = 0; i < BRAZ.n; i++) {
+      const d = sx - BRAZ.x[i];
+      const ad = Math.abs(d);
+      if (ad < 280) { const s = 0.55 + 0.45 * (1 - ad / 280); if (s > str) { str = s; dir = d >= 0 ? 1 : -1; } }
+    }
+    const S = BAKED.shadow;
+    ctx.globalAlpha = 0.32 * str * k;
+    const cw = rx * 2.6, ch = ry * 1.5;
+    ctx.drawImage(S, sx + dir * rx * 0.95 - cw / 2, z + 2 - ch / 2 - ry * 0.25, cw, ch);   // cast
+    ctx.globalAlpha = 0.78 * k;
+    ctx.drawImage(S, sx - rx * 1.05 * k, z + 3 - ry * 1.05 * k, rx * 2.1 * k, ry * 2.1 * k); // contact
+    ctx.globalAlpha = 1;
   }
 
   function heroDrawHeight(heroId) {
@@ -1784,7 +2009,7 @@
   function drawHero(x, z, y, facing, heroId, state, animT, invuln, ghost) {
     const key = heroId === 'thebeard' ? 'thebeard' : 'mzcookie';
     const h = heroDrawHeight(heroId);
-    if (!ghost) drawGroundShadow(x, z, heroId === 'thebeard' ? 32 : 24, heroId === 'thebeard' ? 10 : 8);
+    if (!ghost) drawGroundShadow(x, z, heroId === 'thebeard' ? 32 : 26, heroId === 'thebeard' ? 10 : 9, y);
 
     let vis = null;
     if (!ghost) {
@@ -1819,7 +2044,7 @@
   function drawEnemy(e) {
     const sx = e.x - camX;
     const sc = e.scale || 1;
-    drawGroundShadow(e.x, e.z, 22 * sc, 8 * sc);
+    drawGroundShadow(e.x, e.z, 24 * sc, 8.5 * sc, e.y);
 
     const key = e.isBoss ? 'boss' : (e.type === 'shield' ? 'shield' : e.type === 'zealot' ? 'zealot' : 'marauder');
     const baseH = e.isBoss ? 118 : 112;
@@ -2194,18 +2419,26 @@
   // =========================================================================
   // CARVED STONE & GOLD HUD + TOUCH CONTROLS
   // =========================================================================
+  // Colour grade + vignette, baked once per layout into a small canvas and stretched
+  // (a full-screen 'soft-light' composite every frame was the single most expensive draw).
+  const gradeCV = document.createElement('canvas');
+  let gradeKey = '';
   function drawGrade() {
     if (!QUALITY.grade) return;
-    const vg = ctx.createRadialGradient(W * 0.5, H * 0.52, H * 0.18, W * 0.5, H * 0.55, H * 0.92);
-    vg.addColorStop(0, 'rgba(0,0,0,0)');
-    vg.addColorStop(0.65, 'rgba(20, 6, 0, 0.08)');
-    vg.addColorStop(1, 'rgba(10, 2, 0, 0.46)');
-    ctx.fillStyle = vg;
-    ctx.fillRect(0, 0, W, H);
-    ctx.globalCompositeOperation = 'soft-light';
-    ctx.fillStyle = 'rgba(255, 140, 50, 0.16)';
-    ctx.fillRect(0, 0, W, H);
-    ctx.globalCompositeOperation = 'source-over';
+    const key = W + 'x' + H;
+    if (gradeKey !== key) {
+      gradeKey = key;
+      const gw = 320, gh = Math.max(90, Math.round(320 * H / W));
+      gradeCV.width = gw; gradeCV.height = gh;
+      const g = gradeCV.getContext('2d');
+      g.setTransform(gw / W, 0, 0, gh / H, 0, 0);
+      const vg = g.createRadialGradient(W * 0.5, H * 0.52, H * 0.18, W * 0.5, H * 0.55, H * 0.92);
+      vg.addColorStop(0, 'rgba(255, 140, 50, 0.05)');
+      vg.addColorStop(0.65, 'rgba(70, 22, 4, 0.11)');
+      vg.addColorStop(1, 'rgba(14, 3, 0, 0.48)');
+      g.fillStyle = vg; g.fillRect(0, 0, W, H);
+    }
+    ctx.drawImage(gradeCV, 0, 0, W, H);
   }
 
   function drawBloomLights() {
@@ -2243,12 +2476,17 @@
       b.restore();
     }
     b.globalCompositeOperation = 'source-over';
+    // cheap blur: downsample to ~1/3 and let bilinear upscaling soften it (no ctx.filter)
+    const sw2 = Math.max(48, Math.round(bw / 3)), sh2 = Math.max(28, Math.round(bh / 3));
+    if (bloomCV2.width !== sw2 || bloomCV2.height !== sh2) { bloomCV2.width = sw2; bloomCV2.height = sh2; }
+    bloomCTX2.clearRect(0, 0, sw2, sh2);
+    bloomCTX2.drawImage(bloomCV, 0, 0, sw2, sh2);
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    ctx.globalAlpha = 0.42;
-    ctx.filter = 'blur(8px)';
+    ctx.globalAlpha = 0.34;
+    ctx.drawImage(bloomCV2, 0, 0, W, H);
+    ctx.globalAlpha = 0.14;
     ctx.drawImage(bloomCV, 0, 0, W, H);
-    ctx.filter = 'none';
     ctx.restore();
   }
 
@@ -2378,7 +2616,7 @@
     const boss = enemies.find(e => e.isBoss && e.state !== 'dead');
     if (boss) {
       const bw = Math.min(460, W * 0.62);
-      const bx = (W - bw) * 0.5, by = 74;
+      const bx = (W - bw) * 0.5, by = bx < 292 ? 136 : 74;
       ctx.fillStyle = '#ffcf66'; ctx.font = 'bold 14px Georgia, serif';
       ctx.fillText(boss.name + (boss.phase === 2 ? ' — PHASE II' : ''), W * 0.5, by - 6);
       ctx.fillStyle = 'rgba(18, 6, 4, 0.88)';
@@ -2403,9 +2641,10 @@
 
     // Zone / Ult Banner
     if (bannerTimer > 0) {
-      const a = Math.min(1, bannerTimer * 1.4);
+      const age = bannerDur - bannerTimer;
+      const a = Math.min(1, bannerTimer * 1.4, age / 0.28);
       ctx.save();
-      ctx.globalAlpha = a;
+      ctx.globalAlpha = a * a * (3 - 2 * a);
       ctx.fillStyle = 'rgba(26, 9, 4, 0.78)';
       ctx.fillRect(0, H * 0.24 - 24, W, 48);
       ctx.strokeStyle = '#e8b343'; ctx.lineWidth = 2;
@@ -2591,14 +2830,25 @@
     }
   }
 
+  const RL = [], RLs = []; let RLn = 0;
+  function rlPush(z, kind, ref) {
+    let o = RL[RLn]; if (!o) o = RL[RLn] = { z: 0, kind: 0, ref: null };
+    o.z = z; o.kind = kind; o.ref = ref; RLn++; RLs.push(o);
+  }
+  function rlCmp(a, b) { return a.z - b.z; }
+
   function render() {
     ctx.setTransform(canvas.width / W, 0, 0, canvas.height / H, 0, 0);
-    if (LOAD.warm.length) {   // pre-upload decoded art to the GPU before it is first needed
-      const n = Math.min(3, LOAD.warm.length);
-      ctx.save(); ctx.globalAlpha = 0.004;
-      for (let i = 0; i < n; i++) { try { ctx.drawImage(LOAD.warm.shift(), 0, 0, 6, 6); } catch (_) {} }
+    if (LOAD.warm.length) {   // pre-upload decoded art to the GPU at full size before it is first needed
+      const n = Math.min(gameState === 'playing' ? 1 : 4, LOAD.warm.length);
+      ctx.save(); ctx.globalAlpha = 0.003;
+      for (let i = 0; i < n; i++) {
+        const im = LOAD.warm.shift();
+        try { ctx.drawImage(im, 0, 0, im.naturalWidth || im.width, im.naturalHeight || im.height); } catch (_) {}
+      }
       ctx.restore();
     }
+    if (LOAD.ready && !BAKED.ready) bakeLateArt();
 
     if (gameState !== 'playing') {
       drawTitleOrEnd();
@@ -2607,19 +2857,26 @@
 
     ctx.save();
     if (shakeMag > 0.4) {
-      ctx.translate((Math.random() - 0.5) * shakeMag, (Math.random() - 0.5) * shakeMag);
+      const st = worldTime * 38;
+      ctx.translate((Math.sin(st) * 0.6 + Math.sin(st * 2.3 + 1.7) * 0.4) * shakeMag * 0.55,
+                    (Math.sin(st * 1.7 + 0.5) * 0.6 + Math.sin(st * 3.1) * 0.4) * shakeMag * 0.45);
     }
 
     drawBackground();
 
-    // Depth-sorted entities (Urns, Pickups, Player, Enemies)
-    const renderList = [];
-    for (const u of urns) if (!u.broken) renderList.push({ z: u.z, fn: () => drawUrn(u) });
-    for (const pk of pickups) renderList.push({ z: pk.z, fn: () => drawPickup(pk) });
-    for (const e of enemies) renderList.push({ z: e.z, fn: () => drawEnemy(e) });
-    renderList.push({
-      z: player.z,
-      fn: () => {
+    // Depth-sorted entities (Urns, Pickups, Player, Enemies) — pooled, allocation-free
+    RLs.length = 0; RLn = 0;
+    for (const u of urns) if (!u.broken) rlPush(u.z, 1, u);
+    for (const pk of pickups) rlPush(pk.z, 2, pk);
+    for (const e of enemies) rlPush(e.z, 3, e);
+    rlPush(player.z, 4, player);
+    RLs.sort(rlCmp);
+    for (let i = 0; i < RLs.length; i++) {
+      const it = RLs[i];
+      if (it.kind === 1) drawUrn(it.ref);
+      else if (it.kind === 2) drawPickup(it.ref);
+      else if (it.kind === 3) drawEnemy(it.ref);
+      else {
         for (const ai of player.afterimages) {
           ctx.save();
           ctx.globalAlpha = (ai.life / 0.16) * 0.45;
@@ -2628,9 +2885,8 @@
         }
         drawHero(player.x, player.z, player.y, player.facing, player.active, player.state, player.animT, player.invuln);
       }
-    });
-    renderList.sort((a, b) => a.z - b.z);
-    for (const item of renderList) item.fn();
+    }
+    drawDust();
 
     // Painted Weapon Smear Arcs
     ctx.save();
@@ -2732,7 +2988,9 @@
   // BOOT
   // =========================================================================
   bakeTextures();
+  bakeFx();
   initEmbers();
+  initDust();
   resize();
   window.addEventListener('resize', resize);
 
