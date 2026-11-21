@@ -75,7 +75,7 @@
   // Multi-frame walk cycles (10 frames, 5x2 atlas). Frames are cut from the same painted
   // sprites; 'stride' is the distance (in 768px source units) the body travels per full cycle,
   // so the cycle phase is driven by distance actually moved and planted feet do not slide.
-  const WALK_META = {"mzcookie": {"n": 10, "cols": 5, "x0": 0, "y0": 0, "x1": 538, "y1": 768, "ax": 314.1, "ay": 759.6, "stride": 293.3, "srcH": 768}, "thebeard": {"n": 10, "cols": 5, "x0": 4, "y0": 4, "x1": 515, "y1": 768, "ax": 119.5, "ay": 759.5, "stride": 280.0, "srcH": 768}, "marauder": {"n": 10, "cols": 5, "x0": 0, "y0": 4, "x1": 487, "y1": 768, "ax": 70.1, "ay": 759.4, "stride": 466.7, "srcH": 768}, "shield": {"n": 10, "cols": 5, "x0": 0, "y0": 6, "x1": 434, "y1": 764, "ax": 275.1, "ay": 757.5, "stride": 366.7, "srcH": 768}, "zealot": {"n": 10, "cols": 5, "x0": 0, "y0": 5, "x1": 574, "y1": 768, "ax": 51.6, "ay": 758.2, "stride": 416.7, "srcH": 768}, "boss": {"n": 10, "cols": 5, "x0": 0, "y0": 0, "x1": 577, "y1": 768, "ax": 161.3, "ay": 759.2, "stride": 366.7, "srcH": 768}};
+  const WALK_META = {"mzcookie": {"n": 10, "cols": 5, "x0": 0, "y0": 0, "x1": 538, "y1": 768, "ax": 314.1, "ay": 759.6, "stride": 751.2, "srcH": 768}, "thebeard": {"n": 10, "cols": 5, "x0": 4, "y0": 4, "x1": 515, "y1": 768, "ax": 119.5, "ay": 759.5, "stride": 581.8, "srcH": 768}, "marauder": {"n": 10, "cols": 5, "x0": 0, "y0": 4, "x1": 487, "y1": 768, "ax": 70.1, "ay": 759.4, "stride": 356.0, "srcH": 768}, "shield": {"n": 10, "cols": 5, "x0": 0, "y0": 6, "x1": 434, "y1": 764, "ax": 275.1, "ay": 757.5, "stride": 254.0, "srcH": 768}, "zealot": {"n": 10, "cols": 5, "x0": 0, "y0": 5, "x1": 574, "y1": 768, "ax": 51.6, "ay": 758.2, "stride": 423.5, "srcH": 768}, "boss": {"n": 10, "cols": 5, "x0": 0, "y0": 0, "x1": 577, "y1": 768, "ax": 161.3, "ay": 759.2, "stride": 196.0, "srcH": 768}};
 
 
   const SPRITE_META = {"mzcookie_idle": {"ax": 0.5839, "ay": 0.9891}, "mzcookie_attack": {"ax": 0.3171, "ay": 0.9884}, "thebeard_idle": {"ax": 0.232, "ay": 0.9889}, "thebeard_attack": {"ax": 0.0765, "ay": 0.9858}, "marauder": {"ax": 0.1439, "ay": 0.9888}, "shield": {"ax": 0.6338, "ay": 0.9863}, "zealot": {"ax": 0.0891, "ay": 0.9873}, "boss": {"ax": 0.2795, "ay": 0.9886}, "urn": {"ax": 0.499, "ay": 0.9842}};
@@ -1724,24 +1724,29 @@
     return true;
   }
 
+  const SKY_PAR = 0.08;
   function drawBackground() {
     const skyH = LANE_TOP + 12;
 
-    // 1. Painted fire-vortex sky, always tiled across the full logical width
+    // 1. Painted fire-vortex sky: ONE cover-fit image (never tiled), parallax 0.08. It is scaled so that the
+    //    whole camera range (0 .. WORLD_LEN-W) still lands inside the picture, so no edge or repeat can show.
     ctx.save();
     ctx.beginPath();
     ctx.rect(0, 0, W, skyH);
     ctx.clip();
-    if (IMG.sky && IMG.sky.naturalWidth) {
-      const destW = Math.max(W * 1.22, 1500);
-      const destH = destW * (IMG.sky.naturalHeight / IMG.sky.naturalWidth);
-      const destY = skyH * 0.40 - destH * 0.46;
-      drawTiledX(IMG.sky, 0.08, destW, destH, destY);
+    const skyImg = (IMG.sky && IMG.sky.naturalWidth) ? IMG.sky : null;
+    if (skyImg) {
+      const iw = skyImg.naturalWidth, ih = skyImg.naturalHeight;
+      const camMax = Math.max(0, WORLD_LEN - W), travel = SKY_PAR * camMax;
+      const sc = Math.max((W + travel) / iw, skyH / ih);
+      const dW = iw * sc, dH = ih * sc;
+      const excess = dW - W;
+      const sx = Math.max(0, Math.min(excess, (excess - travel) / 2 + SKY_PAR * Math.max(0, Math.min(camMax, camX))));
+      // keep the vortex core in the upper-middle of the band; edges are cloud texture
+      const dY = Math.max(skyH - dH, Math.min(0, skyH * 0.40 - dH * 0.45));
+      ctx.drawImage(skyImg, -sx, dY, dW, dH);
     } else {
-      const sx = ((camX * 0.08) % TEX.sky.width + TEX.sky.width) % TEX.sky.width;
-      for (let x = -sx; x < W; x += TEX.sky.width) {
-        ctx.drawImage(TEX.sky, x, 0, TEX.sky.width, skyH);
-      }
+      ctx.drawImage(TEX.sky, 0, 0, W, skyH);
     }
     ctx.restore();
 
@@ -1848,12 +1853,9 @@
       }
     }
 
-    // 4. Level paving-stone arena floor (perspective rows shrink toward the horizon)
-    const gH = H - LANE_TOP + 24;
-    if (IMG.ground && IMG.ground.naturalWidth) {
-      const destW = gH * (IMG.ground.naturalWidth / IMG.ground.naturalHeight);
-      drawTiledX(IMG.ground, 1, destW, gH, LANE_TOP - 10);
-    } else {
+    // 4. Level paving-stone arena floor: horizontal perspective strips, pre-rendered once per layout, scrolled 1:1 with the camera
+    if (!drawFloor()) {
+      const gH = H - LANE_TOP + 24;
       const gx = ((camX % TEX.ground.width) + TEX.ground.width) % TEX.ground.width;
       for (let x = -gx; x < W; x += TEX.ground.width) {
         ctx.drawImage(TEX.ground, x, LANE_TOP - 10, TEX.ground.width, gH);
@@ -1863,6 +1865,85 @@
     // Warm horizon glow + floor haze toward the back wall
     ctx.fillStyle = G.horizon;
     ctx.fillRect(0, LANE_TOP - 70, W, 102);
+  }
+
+
+  // ---------------------------------------------------------------------------
+  // Perspective floor. bg_floor.jpg is an ashlar wall texture (carved frieze on top). The frieze is cropped
+  // away and only brick rows from the lower 2/3 are used. Each strip of the floor takes one brick row and
+  // draws it with a height that grows geometrically from the horizon to the viewer, and a width scale that
+  // follows, so the paving recedes. Everything is baked into one offscreen canvas; per frame each strip is a
+  // single scrolled blit (scroll speed stays exactly 1:1 with the camera, so feet never slip on the ground).
+  // ---------------------------------------------------------------------------
+  const FLOOR = { key: '', cv: null, rows: null, f: 1, top: 0 };
+  const FLOOR_SRC_ROWS = [248, 305, 368, 440, 520, 609, 710];   // brick joints (y in the 768-high source), below the frieze
+  function buildFloor() {
+    const img = IMG.ground;
+    if (!img || !img.naturalWidth) return false;
+    const r = canvas.width / W;
+    let f = r > 1.75 ? 2 : r > 1.15 ? 1.5 : 1;
+    const top = LANE_TOP - 10, band = H - top;
+    const key = W + 'x' + H + ':' + LANE_TOP + ':' + f;
+    if (FLOOR.key === key && FLOOR.cv) return true;
+
+    const sy = img.naturalHeight / 768, srcW = img.naturalWidth;
+    // row heights: geometric growth from thin rows at the horizon to tall rows at the viewer, normalised to fill the band
+    const h0 = Math.max(2.5, band * 0.012), hL = Math.min(band * 0.17, 110);
+    const g = (band - h0) / (band - hL);
+    const n = Math.max(8, Math.round(1 + Math.log(hL / h0) / Math.log(g)));
+    const hs = [];
+    { let sum = 0; for (let k = 0; k < n; k++) sum += Math.pow(g, k);
+      const sc = band / sum; for (let k = 0; k < n; k++) hs.push(sc * Math.pow(g, k)); }
+
+    // deterministic variety: row order + horizontal joint offsets
+    let seed = 20261121; const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296;
+    const rows = []; let y = 0, maxP = 0, prev = -1;
+    for (let k = 0; k < n; k++) {
+      let pi; do { pi = Math.floor(rnd() * (FLOOR_SRC_ROWS.length - 1)); } while (pi === prev); prev = pi;
+      const s0 = (FLOOR_SRC_ROWS[pi] - 2) * sy, s1 = (FLOOR_SRC_ROWS[pi + 1] - 2) * sy;
+      const v = hs[k] / (s1 - s0);                            // vertical scale, logical px per source px
+      const P = srcW * Math.pow(v, 0.85) * 0.95;              // period in logical px: width follows depth, slightly flatter
+      rows.push({ y, h: hs[k], s0, s1, P, off: rnd() * P });
+      maxP = Math.max(maxP, P); y += hs[k];
+    }
+    // memory guard: cap the offscreen at ~6 Mpx
+    const cw0 = W + maxP + 4;
+    f = Math.min(f, Math.sqrt(6e6 / (cw0 * band)));
+    const cv = document.createElement('canvas');
+    cv.width = Math.ceil(cw0 * f); cv.height = Math.ceil(band * f);
+    const c = cv.getContext('2d');
+    c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+    for (let k = 0; k < n; k++) {
+      const R0 = rows[k];
+      R0.y0 = Math.round(R0.y * f);
+      R0.y1 = k === n - 1 ? cv.height : Math.round((R0.y + R0.h) * f) + 1;   // +1: overlap, no hairline seams
+      const pw = R0.P * f;
+      for (let x = -(R0.off * f); x < cv.width; x += pw) {
+        c.drawImage(img, 0, R0.s0, srcW, R0.s1 - R0.s0, x, R0.y0, pw + 1, R0.y1 - R0.y0);
+      }
+    }
+    // light: soft dark gradient at the horizon, warm lift at the bottom edge
+    let gr = c.createLinearGradient(0, 0, 0, band * 0.34 * f);
+    gr.addColorStop(0, 'rgba(24, 8, 2, 0.70)'); gr.addColorStop(0.5, 'rgba(24, 8, 2, 0.28)'); gr.addColorStop(1, 'rgba(24, 8, 2, 0)');
+    c.fillStyle = gr; c.fillRect(0, 0, cv.width, band * 0.34 * f);
+    const wy = band * 0.62 * f;
+    gr = c.createLinearGradient(0, wy, 0, cv.height);
+    gr.addColorStop(0, 'rgba(255, 190, 105, 0)'); gr.addColorStop(1, 'rgba(255, 190, 105, 0.20)');
+    c.globalCompositeOperation = 'lighter';
+    c.fillStyle = gr; c.fillRect(0, wy, cv.width, cv.height - wy);
+
+    FLOOR.cv = cv; FLOOR.rows = rows; FLOOR.f = f; FLOOR.top = top; FLOOR.key = key;
+    return true;
+  }
+  function drawFloor() {
+    if (!buildFloor()) return false;
+    const f = FLOOR.f, rows = FLOOR.rows, wf = Math.round(W * f);
+    for (let k = 0; k < rows.length; k++) {
+      const R0 = rows[k];
+      const sx = Math.round((((camX % R0.P) + R0.P) % R0.P) * f);
+      ctx.drawImage(FLOOR.cv, sx, R0.y0, wf, R0.y1 - R0.y0, 0, FLOOR.top + R0.y0 / f, W, (R0.y1 - R0.y0) / f);
+    }
+    return true;
   }
 
   // Cached gradients / pre-baked art (no per-frame canvas or gradient creation)
