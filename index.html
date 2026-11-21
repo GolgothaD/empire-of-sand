@@ -38,27 +38,85 @@
     mzcookiePortrait: 'assets/portrait_mzcookie.jpg',
     thebeardPortrait: 'assets/portrait_thebeard.jpg',
     mzcookie_idle: 'assets/mzcookie_idle.png',
-    mzcookie_walk: 'assets/mzcookie_walk.png',
     mzcookie_attack: 'assets/mzcookie_attack.png',
     thebeard_idle: 'assets/thebeard_idle.png',
-    thebeard_walk: 'assets/thebeard_walk.png',
     thebeard_attack: 'assets/thebeard_attack.png',
     marauder: 'assets/marauder.png',
     shield: 'assets/shield.png',
     zealot: 'assets/zealot.png',
     boss: 'assets/boss.png',
-    urn: 'assets/urn.png'
+    urn: 'assets/urn.png',
+    walk_mzcookie: 'assets/walk_mzcookie.webp',
+    walk_thebeard: 'assets/walk_thebeard.webp',
+    walk_marauder: 'assets/walk_marauder.webp',
+    walk_shield: 'assets/walk_shield.webp',
+    walk_zealot: 'assets/walk_zealot.webp',
+    walk_boss: 'assets/walk_boss.webp',
+    // low-resolution tier for dpr <= ~1.8 (sharper downscale, less memory)
+    mzcookie_idle_lo: 'assets/mzcookie_idle_lo.webp',
+    mzcookie_attack_lo: 'assets/mzcookie_attack_lo.webp',
+    thebeard_idle_lo: 'assets/thebeard_idle_lo.webp',
+    thebeard_attack_lo: 'assets/thebeard_attack_lo.webp',
+    marauder_lo: 'assets/marauder_lo.webp',
+    shield_lo: 'assets/shield_lo.webp',
+    zealot_lo: 'assets/zealot_lo.webp',
+    boss_lo: 'assets/boss_lo.webp',
+    urn_lo: 'assets/urn_lo.webp',
+    walk_mzcookie_lo: 'assets/walk_mzcookie_lo.webp',
+    walk_thebeard_lo: 'assets/walk_thebeard_lo.webp',
+    walk_marauder_lo: 'assets/walk_marauder_lo.webp',
+    walk_shield_lo: 'assets/walk_shield_lo.webp',
+    walk_zealot_lo: 'assets/walk_zealot_lo.webp',
+    walk_boss_lo: 'assets/walk_boss_lo.webp'
   };
 
-  const SPRITE_META = {"mzcookie_idle": {"ax": 0.5839, "ay": 0.9891}, "mzcookie_walk": {"ax": 0.601, "ay": 0.9891}, "mzcookie_attack": {"ax": 0.3171, "ay": 0.9884}, "thebeard_idle": {"ax": 0.232, "ay": 0.9889}, "thebeard_walk": {"ax": 0.4213, "ay": 0.9877}, "thebeard_attack": {"ax": 0.0765, "ay": 0.9858}, "marauder": {"ax": 0.1439, "ay": 0.9888}, "shield": {"ax": 0.6338, "ay": 0.9863}, "zealot": {"ax": 0.0891, "ay": 0.9873}, "boss": {"ax": 0.2795, "ay": 0.9886}, "urn": {"ax": 0.499, "ay": 0.9842}};
+  // Multi-frame walk cycles (10 frames, 5x2 atlas). Frames are cut from the same painted
+  // sprites; 'stride' is the distance (in 768px source units) the body travels per full cycle,
+  // so the cycle phase is driven by distance actually moved and planted feet do not slide.
+  const WALK_META = {"mzcookie": {"n": 10, "cols": 5, "x0": 4, "y0": 4, "x1": 538, "y1": 768, "ax": 314.1, "ay": 759.6, "stride": 400.0, "srcH": 768}, "thebeard": {"n": 10, "cols": 5, "x0": 0, "y0": 4, "x1": 511, "y1": 768, "ax": 119.5, "ay": 759.5, "stride": 366.7, "srcH": 768}, "marauder": {"n": 10, "cols": 5, "x0": 0, "y0": 4, "x1": 487, "y1": 764, "ax": 70.1, "ay": 759.4, "stride": 466.7, "srcH": 768}, "shield": {"n": 10, "cols": 5, "x0": 0, "y0": 6, "x1": 434, "y1": 764, "ax": 275.1, "ay": 757.5, "stride": 366.7, "srcH": 768}, "zealot": {"n": 10, "cols": 5, "x0": 0, "y0": 5, "x1": 574, "y1": 768, "ax": 51.6, "ay": 758.2, "stride": 416.7, "srcH": 768}, "boss": {"n": 10, "cols": 5, "x0": 0, "y0": 0, "x1": 577, "y1": 764, "ax": 161.3, "ay": 759.2, "stride": 366.7, "srcH": 768}};
+
+
+  const SPRITE_META = {"mzcookie_idle": {"ax": 0.5839, "ay": 0.9891}, "mzcookie_attack": {"ax": 0.3171, "ay": 0.9884}, "thebeard_idle": {"ax": 0.232, "ay": 0.9889}, "thebeard_attack": {"ax": 0.0765, "ay": 0.9858}, "marauder": {"ax": 0.1439, "ay": 0.9888}, "shield": {"ax": 0.6338, "ay": 0.9863}, "zealot": {"ax": 0.0891, "ay": 0.9873}, "boss": {"ax": 0.2795, "ay": 0.9886}, "urn": {"ax": 0.499, "ay": 0.9842}};
 
   const IMG = {};
-  for (const [key, src] of Object.entries(ASSET_PATHS)) {
+  const LOAD = { total: 0, done: 0, ready: false, bootT: Date.now(), warm: [] };
+  // Decide which sprite tier to load first from the expected pixel density (the other tier loads in the background).
+  const _vw0 = Math.max(1, window.innerWidth), _vh0 = Math.max(1, window.innerHeight);
+  const _dpr0 = Math.min(3, window.devicePixelRatio || 1);
+  const _pxs0 = _vw0 / _vh0 >= 1.2 ? _dpr0 * _vh0 / 540 : _dpr0 * _vw0 / 740;
+  const BOOT_LO = 124 * _pxs0 <= 230;
+  function loadAsset(key, src, counted) {
     const im = new Image();
-    im.onload = () => { IMG[key] = im; };
-    im.onerror = () => {};
+    im.decoding = 'async';
+    const fin = (ok) => {
+      if (ok) { IMG[key] = im; LOAD.warm.push(im); }
+      if (counted) { LOAD.done++; if (LOAD.done >= LOAD.total) LOAD.ready = true; }
+    };
+    im.onerror = () => fin(false);
     im.src = src;
+    // Fully decode before the game ever draws it (no first-draw decode hitch on spawn)
+    if (im.decode) im.decode().then(() => fin(true), () => fin(false));
+    else im.onload = () => fin(true);
   }
+  const _later = [];
+  for (const [key, src] of Object.entries(ASSET_PATHS)) {
+    const isLo = key.endsWith('_lo');
+    const sprite = /^(walk_|mzcookie_|thebeard_|marauder|shield|zealot|boss|urn)/.test(key);
+    if (sprite && isLo !== BOOT_LO) { _later.push([key, src]); continue; }
+    LOAD.total++;
+  }
+  for (const [key, src] of Object.entries(ASSET_PATHS)) {
+    const isLo = key.endsWith('_lo');
+    const sprite = /^(walk_|mzcookie_|thebeard_|marauder|shield|zealot|boss|urn)/.test(key);
+    if (sprite && isLo !== BOOT_LO) continue;
+    loadAsset(key, src, true);
+  }
+  // other tier: after the game is ready, low priority
+  (function loadRest() {
+    if (!LOAD.ready && Date.now() - LOAD.bootT < 12000) { setTimeout(loadRest, 400); return; }
+    for (const [key, src] of _later) loadAsset(key, src, false);
+  })();
+  setTimeout(() => { LOAD.ready = true; }, 9000);   // never block the title forever on a failed asset
 
   const QUALITY = {
     maxDpr: 3,
@@ -106,7 +164,8 @@
   let W = 960, H = 540;
   let LANE_TOP = 310, LANE_BOT = 490;
   let isTouchDevice = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
-  let showTouchUI = isTouchDevice;
+  let showTouchUI = true;   // control bubbles show on every device; labels follow the last input used
+  let inputMode = isTouchDevice ? 'touch' : 'keyboard';   // 'touch' | 'keyboard' | 'gamepad'
 
   function resize() {
     vw = Math.max(1, window.innerWidth);
@@ -434,10 +493,18 @@
   let touchBtns = [];
   let hudBtns = [];
 
+  const UI = { baseR: 34, lbl: 14, ph: 26, uiS: 1 };
   function layoutTouchButtons() {
+    // css pixels per logical unit: bubbles/labels grow on small physical screens so they stay tappable and readable
+    const uiS = Math.max(0.3, Math.min(vw / W, vh / H));
+    UI.uiS = uiS;
+    const base = W < 820 ? 34 : 36;
+    UI.baseR = Math.min(54, Math.max(base, 27 / uiS));
+    UI.lbl = Math.min(24, Math.max(14, 12.5 / uiS));
+    UI.ph = Math.min(44, Math.max(26, 23 / uiS));
     const padX = Math.min(44, W * 0.045);
     const padY = Math.min(38, H * 0.065);
-    const baseR = W < 820 ? 34 : 36;
+    const baseR = UI.baseR;
     const rx = W - padX - baseR;
     const ry = H - padY - baseR;
 
@@ -450,9 +517,11 @@
       { id: 'ult',   label: 'FURY', x: rx - baseR * 3.7,  y: ry - baseR * 1.8,  r: baseR * 0.86, col: '#ff5114', down: false }
     ];
 
+    const ph = UI.ph;
+    const pw2 = ph * 2.9, pw1 = ph * 4.5;
     hudBtns = [
-      { id: 'touchToggle', label: () => showTouchUI ? 'TOUCH: ON' : 'TOUCH: OFF', x: W - 188, y: 12, w: 94, h: 26 },
-      { id: 'muteToggle',  label: () => AudioFX.isMuted() ? 'SFX: OFF' : 'SFX: ON', x: W - 86, y: 12, w: 74, h: 26 }
+      { id: 'touchToggle', label: () => showTouchUI ? 'CONTROLS: ON' : 'CONTROLS: OFF', x: W - 12 - pw2 - 8 - pw1, y: 12, w: pw1, h: ph },
+      { id: 'muteToggle',  label: () => AudioFX.isMuted() ? 'SFX: OFF' : 'SFX: ON', x: W - 12 - pw2, y: 12, w: pw2, h: ph }
     ];
   }
 
@@ -467,7 +536,7 @@
   canvas.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     AudioFX.unlock();
-    if (e.pointerType === 'touch') showTouchUI = true;
+    if (e.pointerType === 'touch' || e.pointerType === 'pen') { showTouchUI = true; inputMode = 'touch'; }
     const p = toLogical(e.clientX, e.clientY);
 
     // Check top-right HUD utility buttons
@@ -552,6 +621,7 @@
   // Keyboard
   window.addEventListener('keydown', (e) => {
     AudioFX.unlock();
+    inputMode = 'keyboard';
     const c = e.code;
     if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(c)) e.preventDefault();
     if (keys[c]) return;
@@ -592,6 +662,7 @@
       if (gp.buttons[13]?.pressed) padAxis.y = 1;
 
       const pressed = gp.buttons.map(b => !!b.pressed);
+      if (pressed.some((p, i) => p && !prevPadBtns[i]) || Math.abs(ax) > 0.5 || Math.abs(ay) > 0.5) inputMode = 'gamepad';
       const just = (i) => pressed[i] && !prevPadBtns[i];
 
       if (gameState !== 'playing') {
@@ -756,6 +827,7 @@
   }
 
   function startGame() {
+    if (!LOAD.ready) return;   // art still decoding
     gameState = 'playing';
     zoneIdx = 0; waveIdx = 0; zoneLocked = false; goArrowTimer = 0;
     camX = 0; score = 0; comboCount = 0; comboTimer = 0;
@@ -807,13 +879,16 @@
   // SPAWNING ENEMIES & BOSS
   // =========================================================================
   function spawnEnemy(type, side) {
-    const spawnX = side > 0 ? camX + W + 55 + Math.random() * 80 : camX - 55 - Math.random() * 60;
+    const sc0 = type === 'boss' ? 1.55 : type === 'shield' ? 1.08 : 1;
+    const edge = 60 + 90 * sc0;   // fully off-screen (sprite half-width) so nothing pops in
+    const spawnX = side > 0 ? camX + W + edge + Math.random() * 80 : camX - edge - Math.random() * 60;
     const spawnZ = LANE_TOP + 25 + Math.random() * (LANE_BOT - LANE_TOP - 50);
 
     const base = {
       id: Math.random(),
       type,
-      x: Math.max(40, Math.min(WORLD_LEN - 40, spawnX)),
+      x: spawnX,
+      entered: false,
       z: spawnZ,
       y: 0, vy: 0, vx: 0,
       facing: side > 0 ? -1 : 1,
@@ -1388,7 +1463,8 @@
         if (absDx > targetDist || absDz > 24) {
           const mx = absDx > targetDist ? Math.sign(dx) : 0;
           const mz = absDz > 18 ? Math.sign(dz) : 0;
-          e.x += mx * e.speed * dt;
+          const entryBoost = (zoneLocked && !e.entered) ? 1.7 : 1;
+          e.x += mx * e.speed * entryBoost * dt;
           e.z += mz * (e.speed * 0.62) * dt;
         } else {
           e.state = 'windup';
@@ -1408,7 +1484,11 @@
       }
 
       e.z = Math.max(LANE_TOP, Math.min(LANE_BOT, e.z));
-      if (zoneLocked) e.x = Math.max(camX + 26, Math.min(camX + W - 26, e.x));
+      if (zoneLocked) {
+        const lo = camX + 26, hi = camX + W - 26;
+        if (!e.entered) { if (e.x >= lo && e.x <= hi) e.entered = true; }   // walk in first, clamp afterwards
+        else e.x = Math.max(lo, Math.min(hi, e.x));
+      }
     }
 
     // Particles, Slash Arcs, Floating Text
@@ -1582,29 +1662,110 @@
     }
   }
 
-  function drawWorldSprite(name, x, z, y, facing, drawH, opts) {
-    const img = IMG[name];
-    const meta = SPRITE_META[name];
-    if (!img || !img.naturalWidth || !meta) return false;
-    opts = opts || {};
-    const sx = x - camX;
-    const gy = z - (y || 0);
-    const drawW = drawH * (img.naturalWidth / img.naturalHeight);
+  // ---------------------------------------------------------------------------
+  // Sprite drawing: rest poses + distance-driven walk cycles, tiered by pixel density
+  // ---------------------------------------------------------------------------
+  let frameNo = 0;
+  let frameDt = 1 / 60;
+  const FADE_T = 0.085;
+
+  function pickImg(key, drawH) {
+    const need = drawH * (canvas.width / W);
+    const a = IMG[key], b = IMG[key + '_lo'];
+    return need <= 230 ? (b || a) : (a || b);
+  }
+
+  // spec: { k: 'rest', name } | { k: 'walk', key, f }
+  function blitSpec(spec, x, z, y, facing, drawH, o) {
+    const scale = drawH / 768;
+    let img, sx = 0, sy = 0, sw, sh, dx, dy, dw, dh;
+    if (spec.k === 'walk') {
+      const m = WALK_META[spec.key];
+      img = pickImg('walk_' + spec.key, drawH);
+      if (!m || !img || !img.naturalWidth) return false;
+      const rows = Math.ceil(m.n / m.cols);
+      sw = img.naturalWidth / m.cols; sh = img.naturalHeight / rows;
+      sx = (spec.f % m.cols) * sw; sy = Math.floor(spec.f / m.cols) * sh;
+      dw = (m.x1 - m.x0) * scale; dh = (m.y1 - m.y0) * scale;
+      dx = -(m.ax - m.x0) * scale; dy = -(m.ay - m.y0) * scale;
+    } else {
+      const meta = SPRITE_META[spec.name];
+      img = pickImg(spec.name, drawH);
+      if (!meta || !img || !img.naturalWidth) return false;
+      sw = img.naturalWidth; sh = img.naturalHeight;
+      dh = drawH; dw = drawH * (sw / sh);
+      dx = -meta.ax * dw; dy = -meta.ay * dh;
+    }
     ctx.save();
-    if (opts.alpha != null) ctx.globalAlpha *= opts.alpha;
-    if (opts.invuln) {
-      if (Math.floor(worldTime * 22) % 2 === 0) ctx.globalAlpha *= 0.55;
+    if (o.alpha != null) ctx.globalAlpha *= o.alpha;
+    if (o.invuln && Math.floor(worldTime * 22) % 2 === 0) ctx.globalAlpha *= 0.55;
+    ctx.translate(x - camX, z - (y || 0));
+    ctx.scale(facing >= 0 ? 1 : -1, o.squashY || 1);
+    if (o.rot) ctx.rotate(o.rot);
+    ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
+    if (o.flash) {
+      // white-hot hit flash without ctx.filter (not supported on iOS Safari)
+      ctx.globalCompositeOperation = 'lighter';
+      const ga = ctx.globalAlpha;
+      ctx.globalAlpha = ga * 0.6; ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
+      ctx.globalAlpha = ga * 0.4; ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
     }
-    ctx.translate(sx, gy);
-    ctx.scale(facing >= 0 ? 1 : -1, opts.squashY || 1);
-    if (opts.rot) ctx.rotate(opts.rot);
-    if (opts.flash) {
-      ctx.filter = 'brightness(2.4) saturate(0.25)';
-    }
-    ctx.drawImage(img, -meta.ax * drawW, -meta.ay * drawH, drawW, drawH);
-    ctx.filter = 'none';
     ctx.restore();
     return true;
+  }
+
+  function newVis() {
+    return { lx: null, lz: 0, phase: 0, mvT: 0, sig: '', spec: null, prev: null, fade: 0, seen: -9, tick: 0, lean: 0 };
+  }
+
+  // Advance the stride phase by the distance actually travelled this frame. Returns true while walking.
+  function stepVis(vis, x, z, facing, drawH, walkKey, canWalk, dustSize) {
+    if (frameNo - vis.seen > 2) { vis.lx = null; vis.sig = ''; vis.prev = null; vis.fade = 0; vis.mvT = 0; }
+    vis.seen = frameNo;
+    const dtf = Math.max(0.001, frameDt);
+    if (vis.lx !== null) {
+      const ddx = x - vis.lx, ddz = z - vis.lz;
+      const dist = Math.hypot(ddx, ddz);
+      if (dist < 60 && dist / dtf > 8 && canWalk) {
+        const stride = WALK_META[walkKey].stride * drawH / 768;
+        const dir = Math.abs(ddx) >= Math.abs(ddz) ? (ddx * facing >= 0 ? 1 : -1) : 1;
+        vis.phase += dir * dist / stride;
+        vis.phase -= Math.floor(vis.phase);
+        vis.mvT = 0.09;
+        // dust kicks up on each foot plant
+        const tick = Math.floor(vis.phase * 2);
+        if (tick !== vis.tick && dir > 0) {
+          vis.tick = tick;
+          spawnParticles(x - facing * 6, z - 1, 2, 'rgba(226, 184, 120, 0.8)', 38, dustSize || 2.2);
+        }
+        vis.tick = tick;
+      }
+    }
+    vis.lx = x; vis.lz = z;
+    if (vis.mvT > 0) vis.mvT -= dtf;
+    return canWalk && vis.mvT > 0;
+  }
+
+  // Draw a spec; crossfade briefly from the previous pose when the pose set changes.
+  function drawActorSpec(vis, spec, x, z, y, facing, drawH, o) {
+    if (vis) {
+      const sig = spec.k === 'walk' ? 'w' + spec.key : 'r' + spec.name;
+      if (vis.sig && vis.sig !== sig && vis.spec) { vis.prev = vis.spec; vis.fade = FADE_T; }
+      vis.sig = sig; vis.spec = spec;
+      if (vis.fade > 0) vis.fade -= frameDt;
+      if (vis.fade > 0 && vis.prev) {
+        const t = 1 - vis.fade / FADE_T;
+        const base = Object.assign({}, o); base.alpha = o.alpha;
+        const ok = blitSpec(vis.prev, x, z, y, facing, drawH, base);
+        const top = Object.assign({}, o); top.alpha = (o.alpha == null ? 1 : o.alpha) * t;
+        return blitSpec(spec, x, z, y, facing, drawH, top) || ok;
+      }
+    }
+    return blitSpec(spec, x, z, y, facing, drawH, o);
+  }
+
+  function drawWorldSprite(name, x, z, y, facing, drawH, opts) {
+    return blitSpec({ k: 'rest', name }, x, z, y, facing, drawH, opts || {});
   }
 
   function drawGroundShadow(x, z, rx, ry) {
@@ -1618,60 +1779,77 @@
     return heroId === 'thebeard' ? 132 : 124;
   }
 
-  function heroSpriteName(heroId, state) {
-    const p = heroId === 'thebeard' ? 'thebeard' : 'mzcookie';
-    if (state === 'light' || state === 'heavy' || state === 'ult') return p + '_attack';
-    if (state === 'walk') return p + '_walk';
-    return p + '_idle';
-  }
+  function easeOut(t) { return 1 - (1 - t) * (1 - t); }
 
-  function drawHero(x, z, y, facing, heroId, state, animT, invuln) {
-    const breathe = state === 'idle' || state === 'walk'
-      ? 1 + Math.sin(worldTime * (state === 'walk' ? 11 : 3.2)) * (state === 'walk' ? 0.03 : 0.012)
-      : 1;
-    const bob = state === 'walk' ? Math.abs(Math.sin(animT)) * 3.5 : Math.sin(worldTime * 3.2) * 1.2;
-    const name = heroSpriteName(heroId, state);
+  function drawHero(x, z, y, facing, heroId, state, animT, invuln, ghost) {
+    const key = heroId === 'thebeard' ? 'thebeard' : 'mzcookie';
     const h = heroDrawHeight(heroId);
-    drawGroundShadow(x, z, heroId === 'thebeard' ? 32 : 24, heroId === 'thebeard' ? 10 : 8);
-    const ok = drawWorldSprite(name, x, z, (y || 0) + bob, facing, h, {
-      squashY: breathe,
-      invuln: invuln > 0,
-      flash: state === 'hurt',
-      rot: state === 'hurt' ? -0.08 * facing : 0
-    });
-    if (ok) return;
+    if (!ghost) drawGroundShadow(x, z, heroId === 'thebeard' ? 32 : 24, heroId === 'thebeard' ? 10 : 8);
 
-    // Fallback to the original painter if a sprite has not loaded yet
-    drawHeroFallback(x, z, y, facing, heroId, state, animT, invuln);
+    let vis = null;
+    if (!ghost) {
+      player.visBy = player.visBy || {};
+      vis = player.visBy[key] || (player.visBy[key] = newVis());
+    }
+    const attacking = state === 'light' || state === 'heavy' || state === 'ult';
+    const walking = vis ? stepVis(vis, x, z, facing, h, key, state === 'walk' && !(y > 1), 2.4) : false;
+
+    let spec;
+    if (attacking) spec = { k: 'rest', name: key + '_attack' };
+    else if (walking) spec = { k: 'walk', key, f: Math.floor(vis.phase * WALK_META[key].n) % WALK_META[key].n };
+    else spec = { k: 'rest', name: key + '_idle' };
+
+    // idle breathing (feet stay planted) + attack anticipation / follow-through
+    let squash = 1, rot = 0;
+    if (!attacking && !walking && state !== 'hurt') squash = 1 + Math.sin(worldTime * 2.6) * 0.009;
+    if (attacking && !ghost) {
+      const prog = 1 - player.stateTimer / Math.max(0.01, player.stateDur);
+      if (prog < 0.22) { const k = prog / 0.22; rot = -0.07 * k; squash = 1 - 0.035 * k; }
+      else if (prog < 0.5) { const k = (prog - 0.22) / 0.28; rot = -0.07 + 0.16 * easeOut(k); squash = 0.965 + 0.065 * easeOut(k); }
+      else { const k = Math.min(1, (prog - 0.5) / 0.5); rot = 0.09 * (1 - k); squash = 1.03 - 0.03 * k; }
+    } else if (state === 'dodge') { rot = 0.14; squash = 0.97; }
+    else if (state === 'hurt') rot = -0.1;
+
+    const ok = drawActorSpec(vis, spec, x, z, y || 0, facing, h, {
+      squashY: squash, rot, invuln: invuln > 0, flash: state === 'hurt'
+    });
+    if (!ok) drawHeroFallback(x, z, y, facing, heroId, state, animT, invuln);
   }
 
   function drawEnemy(e) {
     const sx = e.x - camX;
     const sc = e.scale || 1;
-    const bob = e.state === 'approach' ? Math.abs(Math.sin(e.animT)) * 3.5 : (e.state === 'idle' ? Math.sin(worldTime * 3 + e.id) * 1.2 : 0);
     drawGroundShadow(e.x, e.z, 22 * sc, 8 * sc);
 
-    if (e.state === 'dead') {
-      ctx.save();
-      ctx.globalAlpha = Math.max(0, e.timer / 0.55);
-    }
-
-    const name = e.isBoss ? 'boss' : (e.type === 'shield' ? 'shield' : e.type === 'zealot' ? 'zealot' : 'marauder');
+    const key = e.isBoss ? 'boss' : (e.type === 'shield' ? 'shield' : e.type === 'zealot' ? 'zealot' : 'marauder');
     const baseH = e.isBoss ? 118 : 112;
     const drawH = baseH * sc;
-    const lean = e.state === 'windup' ? -0.12 : e.state === 'attack' ? 0.16 : 0;
-    const ok = drawWorldSprite(name, e.x, e.z, (e.y || 0) + bob, e.facing, drawH, {
-      rot: lean,
-      flash: e.hurtFlash > 0
-    });
+    const vis = e.vis || (e.vis = newVis());
+    const dead = e.state === 'dead';
+    const canWalk = e.state === 'approach' && !(e.y > 1) && Math.abs(e.vx) < 30;
+    const walking = dead ? false : stepVis(vis, e.x, e.z, e.facing, drawH, key, canWalk, e.isBoss ? 4.4 : 2.4);
+    const spec = walking
+      ? { k: 'walk', key, f: Math.floor(vis.phase * WALK_META[key].n) % WALK_META[key].n }
+      : { k: 'rest', name: key };
 
-    if (!ok) {
-      if (e.state === 'dead') ctx.restore();
-      drawEnemyFallback(e);
-      return;
+    // smooth lean: wind-up anticipation back, strike forward, hurt recoil, death fall
+    let target = 0;
+    if (e.state === 'windup') target = -0.14;
+    else if (e.state === 'attack') target = 0.18;
+    else if (e.hurtFlash > 0) target = -0.09;
+    vis.lean += (target - vis.lean) * Math.min(1, frameDt * 16);
+    let rot = vis.lean, alpha = 1, yOff = 0, squash = 1;
+    if (!walking && !dead && e.state !== 'windup' && e.state !== 'attack') squash = 1 + Math.sin(worldTime * 2.4 + e.id * 9) * 0.009;
+    if (dead) {
+      const t = Math.min(1, Math.max(0, 1 - e.timer / 0.55));
+      rot = -1.25 * easeOut(Math.min(1, t * 1.6));
+      alpha = t < 0.55 ? 1 : Math.max(0, 1 - (t - 0.55) / 0.45);
+      yOff = -4 * t;
     }
-
-    if (e.state === 'dead') ctx.restore();
+    const ok = drawActorSpec(vis, spec, e.x, e.z, (e.y || 0) + yOff, e.facing, drawH, {
+      rot, alpha, squashY: squash, flash: e.hurtFlash > 0
+    });
+    if (!ok) { drawEnemyFallback(e); return; }
 
     if (e.state === 'windup') {
       ctx.fillStyle = 'rgba(255, 70, 25, 0.92)';
@@ -1680,7 +1858,7 @@
       ctx.fill();
     }
 
-    if (!e.isBoss && e.state !== 'dead' && e.hp < e.maxHp) {
+    if (!e.isBoss && !dead && e.hp < e.maxHp) {
       const bw = 48;
       const by = e.z - e.y - drawH - 12;
       ctx.fillStyle = 'rgba(15, 6, 4, 0.82)';
@@ -2181,7 +2359,15 @@
     // Score & Combo
     ctx.textAlign = 'center';
     ctx.fillStyle = '#ffe599'; ctx.font = 'bold 16px Georgia, serif';
-    ctx.fillText('SCORE ' + String(score).padStart(6, '0'), W * 0.5, 28);
+    {
+      const sTxt = 'SCORE ' + String(score).padStart(6, '0');
+      const sw = ctx.measureText(sTxt).width;
+      if (hudBtns.length && W * 0.5 + sw * 0.5 > hudBtns[0].x - 8) {
+        ctx.textAlign = 'right';
+        ctx.fillText(sTxt, W - 12, 12 + UI.ph + 20);
+        ctx.textAlign = 'center';
+      } else ctx.fillText(sTxt, W * 0.5, 28);
+    }
 
     if (comboCount >= 2) {
       ctx.fillStyle = '#ff9824'; ctx.font = 'bold 26px Georgia, serif';
@@ -2239,54 +2425,117 @@
       ctx.fillStyle = 'rgba(26, 11, 6, 0.76)';
       ctx.strokeStyle = '#b88535'; ctx.lineWidth = 1.3;
       ctx.beginPath(); ctx.roundRect(hb.x, hb.y, hb.w, hb.h, 6); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = '#f7dfaa'; ctx.font = 'bold 11px sans-serif';
+      ctx.fillStyle = '#f7dfaa'; ctx.font = 'bold ' + Math.round(hb.h * 0.42) + 'px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(hb.label(), hb.x + hb.w * 0.5, hb.y + 17);
+      ctx.fillText(hb.label(), hb.x + hb.w * 0.5, hb.y + hb.h * 0.66);
     }
     if (gamepadConnected) {
       ctx.fillStyle = 'rgba(30, 82, 40, 0.85)';
-      ctx.beginPath(); ctx.roundRect(W - 188, 44, 176, 20, 5); ctx.fill();
+      const gby = 12 + UI.ph + 6;
+      ctx.beginPath(); ctx.roundRect(W - 188, gby, 176, 20, 5); ctx.fill();
       ctx.fillStyle = '#a3f7b5'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText('XBOX CONTROLLER CONNECTED', W - 100, 58);
+      ctx.fillText('XBOX CONTROLLER CONNECTED', W - 100, gby + 14);
     }
 
-    // Touch Overlay Controls
-    if (showTouchUI) {
-      // Dynamic Floating Stick (dim guide when idle, crisp active ring when touched)
-      const sx = stick.id !== null ? stick.ox : 94;
-      const sy = stick.id !== null ? stick.oy : H - 96;
-      const kx = stick.id !== null ? stick.cx : sx;
-      const ky = stick.id !== null ? stick.cy : sy;
+    if (showTouchUI) drawControlBubbles();
+  }
 
-      ctx.save();
-      ctx.globalAlpha = stick.id !== null ? 0.78 : 0.34;
-      ctx.strokeStyle = '#f2c15a'; ctx.lineWidth = 2.5;
-      ctx.fillStyle = 'rgba(24, 10, 5, 0.45)';
-      ctx.beginPath(); ctx.arc(sx, sy, stick.maxR, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  const BUBBLE_LABELS = {
+    touch:    { light: ['ATK', ''], heavy: ['HVY', ''], jump: ['JMP', ''], dodge: ['DASH', ''], swap: ['SWAP', ''], ult: ['FURY', ''] },
+    keyboard: { light: ['J', 'ATK'], heavy: ['K', 'HVY'], jump: ['SPACE', 'JMP'], dodge: ['L', 'DASH'], swap: ['Q', 'SWAP'], ult: ['U', 'FURY'] },
+    gamepad:  { light: ['X', 'ATK'], heavy: ['Y', 'HVY'], jump: ['A', 'JMP'], dodge: ['B', 'DASH'], swap: ['LB', 'SWAP'], ult: ['LT', 'FURY'] }
+  };
+  const PAD_RING = { light: '#3b8be0', heavy: '#e6b92e', jump: '#43b24f', dodge: '#df4a42', swap: '#aab3bd', ult: '#aab3bd' };
+
+  function fitText(txt, px, maxW, weight) {
+    ctx.font = weight + ' ' + px + 'px sans-serif';
+    while (px > 8 && ctx.measureText(txt).width > maxW) { px -= 1; ctx.font = weight + ' ' + px + 'px sans-serif'; }
+    return px;
+  }
+
+  function drawKeycap(cx, cy, s, txt, lit) {
+    ctx.fillStyle = lit ? 'rgba(255, 190, 70, 0.92)' : 'rgba(26, 11, 6, 0.78)';
+    ctx.strokeStyle = lit ? '#fff0b0' : 'rgba(242, 193, 90, 0.9)';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.roundRect(cx - s / 2, cy - s / 2, s, s, s * 0.2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = lit ? '#2a1204' : '#fff2cf';
+    ctx.font = 'bold ' + Math.round(s * 0.58) + 'px sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(txt, cx, cy + s * 0.04);
+    ctx.textBaseline = 'alphabetic';
+  }
+
+  function drawControlBubbles() {
+    const mode = inputMode;
+    const lab = BUBBLE_LABELS[mode] || BUBBLE_LABELS.touch;
+    const sx = stick.id !== null ? stick.ox : 94;
+    const sy = stick.id !== null ? stick.oy : H - 96;
+    const kx = stick.id !== null ? stick.cx : sx;
+    const ky = stick.id !== null ? stick.cy : sy;
+    const hint = mode !== 'touch';
+
+    // Movement stick / WASD cluster
+    ctx.save();
+    ctx.globalAlpha = stick.id !== null ? 0.8 : (hint ? 0.6 : 0.36);
+    ctx.strokeStyle = '#f2c15a'; ctx.lineWidth = 2.5;
+    ctx.fillStyle = 'rgba(24, 10, 5, 0.45)';
+    ctx.beginPath(); ctx.arc(sx, sy, stick.maxR, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    if (!hint || stick.id !== null) {
       ctx.fillStyle = '#ffbf47';
       ctx.beginPath(); ctx.arc(kx, ky, 22, 0, Math.PI * 2); ctx.fill();
-      ctx.restore();
-
-      // Right-Side Arcade Buttons
-      for (const b of touchBtns) {
-        const isUlt = b.id === 'ult';
-        const ultReady = player.rage >= 100;
-        ctx.save();
-        ctx.globalAlpha = isUlt && !ultReady ? 0.28 : (b.down ? 0.95 : 0.62);
-        const rad = b.down ? b.r * 0.91 : b.r;
-        ctx.fillStyle = b.down ? b.col : 'rgba(26, 11, 6, 0.72)';
-        ctx.strokeStyle = isUlt && ultReady ? '#fff08a' : b.col;
-        ctx.lineWidth = isUlt && ultReady ? 3.5 : 2.5;
-        ctx.beginPath(); ctx.arc(b.x, b.y, rad, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-
-        ctx.fillStyle = '#fff5d6';
-        ctx.font = 'bold 14px sans-serif';
+    }
+    if (hint) {
+      ctx.globalAlpha = 0.9;
+      if (mode === 'keyboard') {
+        const s = Math.max(22, stick.maxR * 0.5), o = s * 0.98;
+        drawKeycap(sx, sy - o, s, 'W', keys['KeyW'] || keys['ArrowUp']);
+        drawKeycap(sx - o, sy, s, 'A', keys['KeyA'] || keys['ArrowLeft']);
+        drawKeycap(sx, sy, s, 'S', keys['KeyS'] || keys['ArrowDown']);
+        drawKeycap(sx + o, sy, s, 'D', keys['KeyD'] || keys['ArrowRight']);
+        ctx.fillStyle = '#ffe9b8'; ctx.font = 'bold ' + Math.round(UI.lbl * 0.62) + 'px sans-serif';
         ctx.textAlign = 'center';
-        ctx.shadowColor = '#000'; ctx.shadowBlur = 4;
-        ctx.fillText(b.label, b.x, b.y + 5);
-        ctx.shadowBlur = 0;
-        ctx.restore();
+        ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(20,8,2,0.85)';
+        ctx.strokeText('WASD / ARROWS', sx, sy + stick.maxR + UI.lbl * 0.95);
+        ctx.fillText('WASD / ARROWS', sx, sy + stick.maxR + UI.lbl * 0.95);
+      } else {
+        ctx.fillStyle = '#fff2cf'; ctx.textAlign = 'center';
+        ctx.font = 'bold ' + Math.round(UI.lbl * 0.95) + 'px sans-serif';
+        ctx.fillText('L-STICK', sx, sy - 2);
+        ctx.font = 'bold ' + Math.round(UI.lbl * 0.6) + 'px sans-serif';
+        ctx.fillText('or D-PAD', sx, sy + UI.lbl * 0.85);
       }
+    }
+    ctx.restore();
+
+    // Action bubbles
+    for (const b of touchBtns) {
+      const isUlt = b.id === 'ult';
+      const ultReady = player.rage >= 100;
+      const L = lab[b.id] || [b.label, ''];
+      ctx.save();
+      ctx.globalAlpha = isUlt && !ultReady ? (hint ? 0.42 : 0.3) : (b.down ? 0.97 : (hint ? 0.82 : 0.64));
+      const rad = b.down ? b.r * 0.91 : b.r;
+      ctx.fillStyle = b.down ? b.col : 'rgba(26, 11, 6, 0.78)';
+      ctx.strokeStyle = isUlt && ultReady ? '#fff08a' : (mode === 'gamepad' ? PAD_RING[b.id] : b.col);
+      ctx.lineWidth = isUlt && ultReady ? 3.5 : 2.8;
+      ctx.beginPath(); ctx.arc(b.x, b.y, rad, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+
+      ctx.fillStyle = '#fff5d6';
+      ctx.textAlign = 'center';
+      ctx.shadowColor = '#000'; ctx.shadowBlur = 4;
+      if (!L[1]) {
+        const px = fitText(L[0], Math.round(UI.lbl), rad * 1.75, 'bold');
+        ctx.fillText(L[0], b.x, b.y + px * 0.34);
+      } else {
+        const big = fitText(L[0], Math.round(UI.lbl * 1.25), rad * 1.6, 'bold');
+        ctx.fillStyle = mode === 'gamepad' ? '#ffffff' : '#ffe27a';
+        ctx.fillText(L[0], b.x, b.y + big * 0.06);
+        const sm = Math.max(9, Math.round(UI.lbl * 0.58));
+        ctx.font = 'bold ' + sm + 'px sans-serif'; ctx.fillStyle = '#e9d3a6';
+        ctx.fillText(L[1], b.x, b.y + big * 0.06 + sm * 1.15);
+      }
+      ctx.shadowBlur = 0;
+      ctx.restore();
     }
   }
 
@@ -2316,8 +2565,10 @@
       ctx.globalAlpha = 0.75 + Math.sin(worldTime * 5) * 0.25;
       ctx.font = 'bold 21px Georgia, serif';
       ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(20, 8, 2, 0.85)'; ctx.fillStyle = '#ffe58f';
-      ctx.strokeText('TAP SCREEN • PRESS ENTER • PRESS XBOX A TO FIGHT', W * 0.5, H * 0.74);
-      ctx.fillText('TAP SCREEN • PRESS ENTER • PRESS XBOX A TO FIGHT', W * 0.5, H * 0.74);
+      const promptTxt = LOAD.ready ? 'TAP SCREEN • PRESS ENTER • PRESS XBOX A TO FIGHT'
+        : 'FORGING THE EMPIRE…  ' + Math.round(100 * LOAD.done / Math.max(1, LOAD.total)) + '%';
+      ctx.strokeText(promptTxt, W * 0.5, H * 0.74);
+      ctx.fillText(promptTxt, W * 0.5, H * 0.74);
       ctx.globalAlpha = 1;
 
       ctx.fillStyle = '#e8c99a'; ctx.font = '13px sans-serif';
@@ -2342,6 +2593,12 @@
 
   function render() {
     ctx.setTransform(canvas.width / W, 0, 0, canvas.height / H, 0, 0);
+    if (LOAD.warm.length) {   // pre-upload decoded art to the GPU before it is first needed
+      const n = Math.min(3, LOAD.warm.length);
+      ctx.save(); ctx.globalAlpha = 0.004;
+      for (let i = 0; i < n; i++) { try { ctx.drawImage(LOAD.warm.shift(), 0, 0, 6, 6); } catch (_) {} }
+      ctx.restore();
+    }
 
     if (gameState !== 'playing') {
       drawTitleOrEnd();
@@ -2366,7 +2623,7 @@
         for (const ai of player.afterimages) {
           ctx.save();
           ctx.globalAlpha = (ai.life / 0.16) * 0.45;
-          drawHero(ai.x, ai.z, ai.y, ai.facing, player.active, 'dodge', 0, 0);
+          drawHero(ai.x, ai.z, ai.y, ai.facing, player.active, 'dodge', 0, 0, true);
           ctx.restore();
         }
         drawHero(player.x, player.z, player.y, player.facing, player.active, player.state, player.animT, player.invuln);
@@ -2483,6 +2740,7 @@
   function loop(now) {
     const dt = Math.min(0.05, (now - lastT) / 1000);
     lastT = now;
+    frameDt = dt; frameNo++;
     update(dt);
     render();
     notePerf(dt);
