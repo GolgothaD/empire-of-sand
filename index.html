@@ -795,6 +795,42 @@
   // GAME STATE & ZONES
   // =========================================================================
   let gameState = 'title'; // 'title' | 'playing' | 'victory' | 'gameover'
+
+  // Game-feel tuning (v5). Top speeds, damage and timings live in HEROES and are unchanged.
+  const ACCEL_T = 0.09;     // seconds from standstill to full speed
+  const DECEL_T = 0.07;     // seconds from full speed to a stop
+  const TURN_T = 0.06;      // visual turn / skid on a facing change
+  const COYOTE_T = 0.08;    // jump grace after leaving the ground
+  const LAND_T = 0.05;      // landing squash (~3 frames)
+  const TAKEOFF_T = 0.10;   // jump stretch
+  const LOOK_AHEAD = 30;    // camera lead in the facing direction
+  const KB_DUR = 0.6;       // eased enemy knockback: same distance, done in 0.6 s instead of a ~1.1 s slide
+  const KB_POW = 2;         // ease-out quad: starts as fast as v4, soft stop (keeps every combo chain connecting as before)
+  const CHAIN_COMP = true;  // keep hit origin on the v4 path through a whole chain
+  const KB_GAIN = 0.3192;   // distance per unit of knock speed (what v4's decaying slide covered at 60 fps)
+  const HITSTOP = { light: 0.030, finisher: 0.045, heavy: 0.065, ult: 0.10 };
+  const STEP_IN = { light: 12, finisher: 20, heavyMz: 16, heavyBeard: 30 };   // px stepped in per swing, front-loaded (v4 crept ~10-20 px evenly)
+  let camLook = 0;
+
+  // Move a velocity toward its target: ramp up over ACCEL_T, brake over DECEL_T (reversals brake first).
+  function easeVel(v, target, top, dt) {
+    if (top <= 0) return target;
+    if (v !== 0 && (target === 0 || Math.sign(target) !== Math.sign(v) || Math.abs(target) < Math.abs(v))) {
+      const lim = target !== 0 && Math.sign(target) === Math.sign(v) ? target : 0;
+      const nv = v - Math.sign(v) * (top / DECEL_T) * dt;
+      if (Math.sign(v) > 0 ? nv <= lim : nv >= lim) return lim;
+      return nv;
+    }
+    const nv = v + Math.sign(target) * (top / ACCEL_T) * dt;
+    return Math.abs(nv) >= Math.abs(target) ? target : nv;
+  }
+
+  // Eased knockback: same total distance as before, fast start and soft stop.
+  function setKnock(e, v0) {
+    e.kbDist = Math.sign(v0) * Math.max(0, Math.abs(v0) * KB_GAIN - 0.64);
+    e.kbP = 0; e.kbT = 0;
+    e.vx = v0;
+  }
   let worldTime = 0;
   let hitStop = 0;
   let shakeMag = 0;
@@ -831,6 +867,10 @@
       ]
     }
   ];
+
+  // The camera can only scroll to WORLD_LEN - W, so on wide screens (W >= 960, i.e. any 16:9 desktop)
+  // ZONE III's 2740 lock was never reached and the boss never spawned. Clamp each lock to what the camera can reach.
+  function lockXOf(i) { return Math.min(ZONES[i].lockX, WORLD_LEN - W); }
 
   let zoneIdx = 0;
   let waveIdx = 0;
@@ -900,8 +940,13 @@
       swapCd: 0,
       animT: 0,
       cape: Array.from({ length: 5 }, () => ({ x: 180, y: 0 })),
-      afterimages: []
+      afterimages: [],
+      vx: 0, vz: 0,
+      turnT: 0, prevFacing: 1, landT: 0, takeT: 0,
+      groundT: 0, jumped: false,
+      hitOff: 0, stepTot: 0, stepE: 0
     };
+    camLook = 0;
 
     enemies = [];
     projectiles = [];
@@ -1024,7 +1069,7 @@
     for (const e of enemies) {
       if (e.state === 'dead') continue;
       if (Math.abs(e.x - player.x) < 115 && Math.abs(e.z - player.z) < 52) {
-        damageEnemy(e, 10, false, player.facing * 130);
+        damageEnemy(e, 10, false, player.facing * 130, 'light');
       }
     }
   }
@@ -1052,12 +1097,15 @@
   function doLight() {
     const h = getHero();
     applyAttackFacing();
+    if (player.comboWindow <= 0 || !CHAIN_COMP) player.hitOff = 0;   // a fresh chain starts from where the hero stands
     player.comboStep = player.comboWindow > 0 ? (player.comboStep + 1) % 3 : 0;
     player.state = 'light';
     player.stateDur = h.lightDur[player.comboStep];
     player.stateTimer = player.stateDur;
     player.comboWindow = player.stateDur + 0.38;
     player.hasHitSet.clear();
+    player.stepE = 0;
+    player.stepTot = player.comboStep === 2 ? STEP_IN.finisher : STEP_IN.light;
     AudioFX.swing(player.comboStep === 2);
     player.arc = addSlashArc(
       player.x + player.facing * 26,
@@ -1071,12 +1119,15 @@
   function doHeavy() {
     const h = getHero();
     applyAttackFacing();
+    if (player.comboWindow <= 0 || !CHAIN_COMP) player.hitOff = 0;
     player.state = 'heavy';
     player.stateDur = h.heavyDur;
     player.stateTimer = player.stateDur;
     player.comboStep = 0;
     player.comboWindow = 0;
     player.hasHitSet.clear();
+    player.stepE = 0;
+    player.stepTot = player.active === 'thebeard' ? STEP_IN.heavyBeard : STEP_IN.heavyMz;
     AudioFX.swing(true);
     player.arc = addSlashArc(
       player.x + player.facing * 32,
@@ -1110,7 +1161,8 @@
     player.stateDur = 0.62;
     player.stateTimer = 0.62;
     player.invuln = 0.9;
-    hitStop = 0.07;
+    player.vx = 0; player.vz = 0;
+    hitStop = HITSTOP.ult;
     shakeMag = 16;
     flashAlpha = 0.65;
     flashColor = h.accent;
@@ -1132,12 +1184,13 @@
           AudioFX.shatter();
           addFloatText(e.x, e.z - 95, 'SHIELD SHATTERED!', '#ff9d3b', 16);
         }
-        damageEnemy(e, player.active === 'thebeard' ? 88 : 74, true, (e.x >= player.x ? 1 : -1) * 280);
+        damageEnemy(e, player.active === 'thebeard' ? 88 : 74, true, (e.x >= player.x ? 1 : -1) * 280, 'ult');
       }
     }
   }
 
-  function damageEnemy(e, dmg, isHeavy, knockX) {
+  function damageEnemy(e, dmg, isHeavy, knockX, hsKind) {
+    const hs = HITSTOP[hsKind || (isHeavy ? 'heavy' : 'light')];
     if (e.state === 'dead') return;
 
     // Frontal shield block check (break with Heavy or flank behind)
@@ -1146,13 +1199,13 @@
       if (isHeavy) {
         e.shield = false;
         AudioFX.shatter();
-        hitStop = 0.055;
+        hitStop = Math.max(hitStop, HITSTOP.heavy);
         shakeMag = 9;
         spawnParticles(e.x, e.z - 46, 20, '#90a4ae', 240, 5);
         addFloatText(e.x, e.z - 94, 'SHIELD BROKEN!', '#ffae38', 17);
       } else {
         AudioFX.clang();
-        e.vx = knockX * 0.25;
+        setKnock(e, knockX * 0.25);
         spawnParticles(e.x + e.facing * 24, e.z - 46, 10, '#ffe49e', 170, 3);
         addFloatText(e.x, e.z - 88, 'BLOCKED! (USE HVY)', '#cbd5e1', 13);
         return;
@@ -1161,7 +1214,7 @@
 
     e.hp -= dmg;
     e.hurtFlash = 0.14;
-    e.vx = knockX * (e.isBoss ? 0.35 : 1);
+    setKnock(e, knockX * (e.isBoss ? 0.35 : 1));
     if (isHeavy && !e.isBoss) e.vy = 210;
 
     comboCount++;
@@ -1169,7 +1222,7 @@
     score += dmg * 5;
     player.rage = Math.min(100, player.rage + (isHeavy ? 10 : 6));
 
-    hitStop = isHeavy ? 0.05 : 0.028;
+    hitStop = Math.max(hitStop, hs);
     shakeMag = Math.max(shakeMag, isHeavy ? 8 : 3.5);
     AudioFX.hit(isHeavy);
     vibrate(isHeavy ? 24 : 11);
@@ -1216,6 +1269,7 @@
     player.invuln = 0.75;
     player.state = 'hurt';
     player.stateTimer = 0.24;
+    player.vx = 0; player.vz = 0;
     player.x = Math.max(camX + 28, Math.min(camX + W - 28, player.x + knockX));
     comboCount = 0;
     shakeMag = 9;
@@ -1289,8 +1343,10 @@
       doSwap();
     } else if (consumeBuffer('dodge', now) && (canAct || canCancel)) {
       doDodge(mv);
-    } else if (consumeBuffer('jump', now) && player.y === 0 && (canAct || canCancel)) {
+    } else if (consumeBuffer('jump', now) && (player.y === 0 || (!player.jumped && worldTime - player.groundT <= COYOTE_T)) && (canAct || canCancel)) {
       player.vy = h.jumpVel;
+      player.jumped = true;
+      player.takeT = TAKEOFF_T;
       player.state = 'idle';
       AudioFX.dodge();
     } else if (consumeBuffer('heavy', now) && (canAct || canCancel)) {
@@ -1307,7 +1363,12 @@
       if (Math.random() < 0.65) {
         player.afterimages.push({ x: player.x, z: player.z, y: player.y, facing: player.facing, life: 0.16, col: h.accent });
       }
-      if (player.stateTimer <= 0) player.state = 'idle';
+      if (player.stateTimer <= 0) {
+        player.state = 'idle';
+        // carry on running if the stick still points the dash direction, otherwise stop clean
+        player.vx = mv.x * player.facing > 0.3 ? mv.x * h.speed : 0;
+        player.vz = 0;
+      }
     } else if (player.state === 'light' || player.state === 'heavy') {
       player.stateTimer -= dt;
       const prog = 1 - (player.stateTimer / Math.max(0.01, player.stateDur));
@@ -1327,9 +1388,25 @@
           } else { player.wantFace = want; player.wantT = now; }
         } else player.wantFace = 0;
       }
-      // lunge forward + slight steering drift
-      player.x += player.facing * 45 * dt + mv.x * h.speed * 0.22 * dt;
-      player.z += mv.y * h.speed * 0.66 * 0.3 * dt;
+      // eased steering drift + step-in toward the facing (front-loaded, stops short of a foe in front)
+      player.vx = easeVel(player.vx, mv.x * h.speed * 0.22, h.speed, dt);
+      player.vz = easeVel(player.vz, mv.y * h.speed * 0.66 * 0.3, h.speed * 0.66, dt);
+      const sp = Math.min(1, prog / 0.5), se = 1 - (1 - sp) * (1 - sp);
+      let step = player.facing * player.stepTot * (se - player.stepE);
+      player.stepE = se;
+      if (step !== 0) {
+        for (const e of enemies) {
+          if (e.state === 'dead') continue;
+          const ahead = (e.x - player.x) * player.facing;
+          if (ahead >= 0 && ahead < 34 && Math.abs(e.z - player.z) <= 44) { step = 0; break; }
+        }
+      }
+      const ddx = player.vx * dt + step;
+      player.x += ddx;
+      player.z += player.vz * dt;
+      // hits are resolved from where the v4 lunge would have put the hero, so connect ranges stay identical
+      player.hitOff += ddx - (player.facing * 45 * dt + mv.x * h.speed * 0.22 * dt);
+      const hx = player.x - player.hitOff;
 
       // Active hit window
       if (prog >= 0.22 && prog <= 0.72) {
@@ -1339,17 +1416,18 @@
 
         for (const e of enemies) {
           if (e.state === 'dead' || player.hasHitSet.has(e.id)) continue;
-          const dx = (e.x - player.x) * player.facing;
+          const dx = (e.x - hx) * player.facing;
           const dz = Math.abs(e.z - player.z);
           if (dx >= -24 && dx <= reach && dz <= 44) {
             player.hasHitSet.add(e.id);
-            damageEnemy(e, dmg, isHvy, player.facing * (isHvy ? 235 : 95));
+            damageEnemy(e, dmg, isHvy, player.facing * (isHvy ? 235 : 95),
+              player.state === 'heavy' ? 'heavy' : player.comboStep === 2 ? 'finisher' : 'light');
           }
         }
         // Smash urns
         for (const u of urns) {
           if (u.broken) continue;
-          const dx = (u.x - player.x) * player.facing;
+          const dx = (u.x - hx) * player.facing;
           if (dx >= -20 && dx <= reach && Math.abs(u.z - player.z) < 42) {
             u.broken = true;
             AudioFX.shatter();
@@ -1361,14 +1439,38 @@
       if (player.stateTimer <= 0) player.state = 'idle';
     } else if (player.state === 'hurt' || player.state === 'ult') {
       player.stateTimer -= dt;
+      player.vx = 0; player.vz = 0; player.hitOff = 0;
       if (player.stateTimer <= 0) player.state = 'idle';
     } else {
-      player.x += mv.x * h.speed * dt;
-      player.z += mv.y * (h.speed * 0.66) * dt;
+      player.vx = easeVel(player.vx, mv.x * h.speed, h.speed, dt);
+      player.vz = easeVel(player.vz, mv.y * (h.speed * 0.66), h.speed * 0.66, dt);
+      player.x += player.vx * dt;
+      player.z += player.vz * dt;
+      if (Math.abs(mv.x) > 0.08 || Math.abs(mv.y) > 0.08) player.hitOff = 0;   // steering by hand: hits come from where the hero is
       if (Math.abs(mv.x) > 0.1) player.facing = mv.x > 0 ? 1 : -1;
-      player.state = (Math.abs(mv.x) > 0.08 || Math.abs(mv.y) > 0.08) ? 'walk' : 'idle';
+      const gliding = Math.abs(player.vx) > 6 || Math.abs(player.vz) > 6;
+      player.state = (Math.abs(mv.x) > 0.08 || Math.abs(mv.y) > 0.08 || gliding) ? 'walk' : 'idle';
       if (player.state === 'walk') player.animT += dt * 11;
     }
+
+    // Visual turn / skid on any facing change (gameplay facing itself switches immediately)
+    if (player.facing !== player.prevFacing) {
+      player.prevFacing = player.facing;
+      player.turnT = TURN_T;
+      if (player.y === 0) {
+        for (let i = 0; i < 7; i++) {
+          particles.push({
+            x: player.x - player.facing * (4 + Math.random() * 10), y: player.z - 2 - Math.random() * 4,
+            vx: -player.facing * (40 + Math.random() * 70), vy: -30 - Math.random() * 50,
+            life: 0.22 + Math.random() * 0.18, maxLife: 0.4, size: 2.2 + Math.random() * 2.4,
+            color: 'rgba(226, 184, 120, 0.85)'
+          });
+        }
+      }
+    }
+    if (player.turnT > 0) player.turnT -= dt;
+    if (player.landT > 0) player.landT -= dt;
+    if (player.takeT > 0) player.takeT -= dt;
 
     // Jump physics
     if (player.y > 0 || player.vy !== 0) {
@@ -1376,15 +1478,23 @@
       player.vy -= 1450 * dt;
       if (player.y <= 0) {
         player.y = 0; player.vy = 0;
+        player.landT = LAND_T;
         spawnParticles(player.x, player.z, 5, '#d49655', 85, 3);
       }
     }
+    if (player.y === 0 && player.vy === 0) { player.groundT = worldTime; player.jumped = false; }
 
     // Clamp player to lane & camera arena
     player.z = Math.max(LANE_TOP, Math.min(LANE_BOT, player.z));
     const minX = camX + 34;
     const maxX = zoneLocked ? camX + W - 34 : WORLD_LEN - 40;
+    const preX = player.x;
     player.x = Math.max(minX, Math.min(maxX, player.x));
+    if (player.hitOff) {
+      // the v4-path hit origin hits the same walls the hero does; never let it drift far from the body
+      const gx = Math.max(minX, Math.min(maxX, preX - player.hitOff));
+      player.hitOff = Math.max(-40, Math.min(40, player.x - gx));
+    }
 
     // Cape cloth trail
     player.cape[0].x = player.x - player.facing * 12;
@@ -1402,10 +1512,11 @@
 
     // Camera & Zone Progression
     if (!zoneLocked) {
-      const targetCam = Math.max(camX, Math.min(WORLD_LEN - W, player.x - W * 0.36));
+      camLook += (player.facing * LOOK_AHEAD - camLook) * Math.min(1, dt * 3.5);
+      const targetCam = Math.max(camX, Math.min(WORLD_LEN - W, player.x - W * 0.36 + camLook));
       camX += (targetCam - camX) * Math.min(1, dt * 7);
 
-      if (zoneIdx < ZONES.length && camX >= ZONES[zoneIdx].lockX - 40) {
+      if (zoneIdx < ZONES.length && camX >= lockXOf(zoneIdx) - 40) {
         zoneLocked = true;   // camera keeps easing the last few px (no snap / sudden stop)
         waveIdx = 0;
         goArrowTimer = 0;
@@ -1413,7 +1524,7 @@
         spawnWave();
       }
     } else {
-      const lockX = ZONES[zoneIdx].lockX;
+      const lockX = lockXOf(zoneIdx);
       if (camX !== lockX) {
         const step = (lockX - camX) * Math.min(1, dt * 5);
         camX = Math.abs(lockX - camX) < 0.05 ? lockX : camX + step;
@@ -1466,7 +1577,7 @@
           if (e.state === 'dead' || pr.hitSet.has(e.id)) continue;
           if (Math.abs(e.x - pr.x) < 38 && Math.abs(e.z - pr.z) < 38) {
             pr.hitSet.add(e.id);
-            damageEnemy(e, pr.dmg, pr.heavy, Math.sign(pr.vx) * 165);
+            damageEnemy(e, pr.dmg, pr.heavy, Math.sign(pr.vx) * 165, pr.heavy ? 'heavy' : 'light');
           }
         }
       } else {
@@ -1490,9 +1601,14 @@
       }
 
       // Knockback / airborne physics
-      if (Math.abs(e.vx) > 2) {
-        e.x += e.vx * dt;
-        e.vx *= Math.pow(0.04, dt);
+      if (e.kbDist) {
+        e.kbT = Math.min(KB_DUR, e.kbT + dt);
+        const k = e.kbT / KB_DUR, p = 1 - Math.pow(1 - k, KB_POW);   // ease-out
+        const step = e.kbDist * (p - e.kbP);
+        e.kbP = p;
+        e.x += step;
+        e.vx = step / Math.max(1e-4, dt);
+        if (k >= 1) { e.kbDist = 0; e.vx = 0; }
       }
       if (e.y > 0 || e.vy !== 0) {
         e.y += e.vy * dt;
@@ -1873,7 +1989,7 @@
   // ---------------------------------------------------------------------------
   let frameNo = 0;
   let frameDt = 1 / 60;
-  const FADE_T = 0.085;
+  const FADE_T = 0.05;   // ~3 frames of pose blending
 
   function pickImg(key, drawH) {
     const need = drawH * (canvas.width / W);
@@ -1906,7 +2022,7 @@
     if (o.alpha != null) ctx.globalAlpha *= o.alpha;
     if (o.invuln && Math.floor(worldTime * 22) % 2 === 0) ctx.globalAlpha *= 0.55;
     ctx.translate(x - camX, z - (y || 0));
-    ctx.scale(facing >= 0 ? 1 : -1, o.squashY || 1);
+    ctx.scale((facing >= 0 ? 1 : -1) * (o.sx || 1), o.squashY || 1);
     if (o.rot) ctx.rotate(o.rot);
     ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
     if (o.flash) {
@@ -2035,8 +2151,15 @@
     } else if (state === 'dodge') { rot = 0.14; squash = 0.97; }
     else if (state === 'hurt') rot = -0.1;
 
+    let sx = 1;
+    if (!ghost) {
+      if (player.turnT > 0) { const k = player.turnT / TURN_T; sx *= 1 - 0.38 * k; rot -= 0.13 * k; }      // skid: narrow + lean back
+      if (player.landT > 0) { const k = player.landT / LAND_T; squash *= 1 - 0.14 * k; sx *= 1 + 0.10 * k; }  // landing squash
+      if (player.takeT > 0) { const k = player.takeT / TAKEOFF_T; squash *= 1 + 0.11 * k; sx *= 1 - 0.07 * k; } // takeoff stretch
+    }
+
     const ok = drawActorSpec(vis, spec, x, z, y || 0, facing, h, {
-      squashY: squash, rot, invuln: invuln > 0, flash: state === 'hurt'
+      squashY: squash, sx, rot, invuln: invuln > 0, flash: state === 'hurt'
     });
     if (!ok) drawHeroFallback(x, z, y, facing, heroId, state, animT, invuln);
   }
