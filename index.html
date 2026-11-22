@@ -49,6 +49,9 @@
     zealot: 'assets/zealot.png',
     boss: 'assets/boss.png',
     urn: 'assets/urn.png',
+    prop_urnbroken: 'assets/prop_urnbroken.webp',   // v12: painted broken urn + shards that stay on the ground
+    prop_meat: 'assets/prop_meat.webp',             // v12: painted pot drops (relit like every sprite: sun upper-left)
+    prop_chalice: 'assets/prop_chalice.webp',
     walk_mzcookie: 'assets/walk_mzcookie.webp',
     walk_thebeard: 'assets/walk_thebeard.webp',
     walk_marauder: 'assets/walk_marauder.webp',
@@ -80,6 +83,7 @@
 
 
   const SPRITE_META = {"mzcookie_idle": {"ax": 0.5839, "ay": 0.9891}, "mzcookie_attack": {"ax": 0.3171, "ay": 0.9884}, "thebeard_idle": {"ax": 0.232, "ay": 0.9889}, "thebeard_attack": {"ax": 0.0765, "ay": 0.9858}, "marauder": {"ax": 0.1439, "ay": 0.9888}, "shield": {"ax": 0.6338, "ay": 0.9863}, "zealot": {"ax": 0.0891, "ay": 0.9873}, "boss": {"ax": 0.2795, "ay": 0.9886}, "urn": {"ax": 0.499, "ay": 0.9842}};
+  SPRITE_META.prop_meat = { ax: 0.5, ay: 0.94 }; SPRITE_META.prop_chalice = { ax: 0.5, ay: 0.97 }; SPRITE_META.prop_urnbroken = { ax: 0.5, ay: 0.93 };
 
   const IMG = {};
   const LOAD = { total: 0, done: 0, ready: false, bootT: Date.now(), warm: [] };
@@ -861,7 +865,7 @@
   //
   //  layer   effect             options (defaults)
   //  -----   ----------------   --------------------------------------------------------------------------
-  //  sky     vortexSpin         speed 0.075 rad/s (~4 deg/s), pulse 1 (the eye glow breathes)
+  //  sky     vortexSpin         speed 0.075 rad/s (~4 deg/s) at the core, the outer bands turn at x0.80 / x0.62 / x0.46 of it, pulse 1 (the eye glow breathes)
   //  sky     clouds             count 4 (max 8), speed 1, alpha 1
   //  far     birds              count 4 (max 10), kind 'vulture' | 'crow'
   //  far     caravans           speed 1, lone true (lone walker), start 800, loneStart 760
@@ -1519,10 +1523,11 @@
           if (u.broken) continue;
           const dx = (u.x - hx) * player.facing;
           if (dx >= -20 && dx <= reach && Math.abs(u.z - player.z) < 42) {
-            u.broken = true;
+            u.broken = true; u.brokeT = worldTime;
             AudioFX.shatter();
             spawnParticles(u.x, u.z - 22, 14, '#c77c40', 190, 4.5);
-            pickups.push({ x: u.x, z: u.z, type: u.drop, bob: 0 });
+            spawnParticles(u.x, u.z - 18, 8, '#8a4a22', 150, 3.2);
+            pickups.push({ x: u.x, z: u.z, type: u.drop, bob: 0, age: 0 });
           }
         }
       }
@@ -1643,7 +1648,7 @@
     // Pickups
     for (let i = pickups.length - 1; i >= 0; i--) {
       const pk = pickups[i];
-      pk.bob += dt * 5;
+      pk.bob += dt * 5; pk.age = (pk.age || 0) + dt;
       if (Math.abs(pk.x - player.x) < 42 && Math.abs(pk.z - player.z) < 34) {
         AudioFX.heal();
         if (pk.type === 'meat') {
@@ -1847,7 +1852,8 @@
       const sc = Math.max(skyH / ih, (W - ax + travel) / (iw * (1 - VX)), ax / (iw * VX), ay / (ih * VY), (skyH - ay) / (ih * (1 - VY)));
       const dW = iw * sc, dH = ih * sc;
       const sunX = ax - SKY_PAR * Math.max(0, Math.min(camMax, camX));
-      ctx.drawImage(skyImg, sunX - VX * dW, ay - VY * dH, dW, dH);
+      const cov = SKYC.covered; SKYC.covered = false; SKYC.skipped = cov;
+      if (!cov) ctx.drawImage(skyImg, sunX - VX * dW, ay - VY * dH, dW, dH);   // v12: skipped while the vortex buffer (which contains it) covers the sky; the module re-asserts SKYC.covered each frame it draws
       SUN.x = sunX; SUN.y = ay;
       SKYC.img = skyImg; SKYC.sc = sc; SKYC.sunX = sunX; SKYC.ay = ay; SKYC.skyH = skyH; SKYC.VX = VX; SKYC.VY = VY;
       ambientDraw('sky', SKYC);
@@ -1910,7 +1916,7 @@
     // 3b. Midground painted colonnade + braziers
     const pillarStep = 340, mp = 0.65;
     const firstP = Math.floor((camX * mp) / pillarStep) - 1;
-    BRAZ.n = 0; PILL.n = 0;
+    BRAZ.n = 0; PILL.n = 0; FL_SP.length = 0;
     for (let i = firstP; i < firstP + Math.ceil(W / pillarStep) + 3; i++) {
       const wx = i * pillarStep - camX * mp;
       if (hasArt) {
@@ -1930,39 +1936,13 @@
           ctx.fillStyle = '#2c1408'; ctx.fillRect(bx - 13, by, 26, 36);
           ctx.fillStyle = '#6a3216'; ctx.fillRect(bx - 20, by - 7, 40, 10);
         }
-        // living flame: three tongues leaning and licking on their own beats, a flickering core, and a light pool
-        // that breathes (radius + brightness) with it. Time-based only: nothing here depends on the quality tier.
-        const t = worldTime, ph = i * 2.1;
-        const f1 = Math.sin(t * 11.0 + ph * 0.8), f2 = Math.sin(t * 6.7 + ph * 1.3), f3 = Math.sin(t * 17.0 + ph * 2.9);
-        const flick = f1 * 6 + f2 * 4.5 + f3 * 2.5;                      // -13 .. +13 px of tip travel
-        BRAZ.f[BRAZ.n - 1] = flick;
-        const breath = 0.5 + 0.5 * Math.sin(t * 1.9 + ph);               // ~3.3 s light-pool breathing
-        const glowR = 82 + flick * 1.0 + 20 * breath;
-        ctx.save();
-        ctx.globalCompositeOperation = 'lighter';
-        ctx.globalAlpha = Math.max(0.35, Math.min(1, 0.58 + 0.30 * breath + flick * 0.011));
-        ctx.drawImage(BAKED.glow, bx - glowR, by - 12 - glowR, glowR * 2, glowR * 2);
-        ctx.restore();
-        const tongue = (ox, w, h, lean) => {                             // base half-width w, height h, tip leans by `lean`
-          ctx.save();
-          ctx.translate(bx + ox, by + 2); ctx.transform(1, 0, -lean / h, 1, 0, 0); ctx.scale(w / 20, h / 110);
-          ctx.drawImage(BAKED.flame, -32, -118);
-          ctx.restore();
-        };
-        ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.85;
-        tongue(-7, 11, 31 + f2 * 6 + f3 * 3, -4 + Math.sin(t * 5.1 + ph) * 4);
-        tongue(7, 11, 34 + f3 * 5 + f1 * 3, 4 + Math.sin(t * 4.3 + ph * 1.7) * 4);
-        ctx.globalAlpha = 1;
-        tongue(0, 17, 47 + flick, Math.sin(t * 3.7 + ph * 0.6) * 6);
-        ctx.restore();
-        ctx.save(); ctx.globalAlpha = 0.95; ctx.fillStyle = '#fff3b0'; ctx.beginPath();   // pale core
-        { const ch = 24 + flick * 0.55 + f1 * 3, cl = Math.sin(t * 6.1 + ph) * 2.5, cw = 6.5 + f2 * 1;
-          ctx.moveTo(bx - cw, by + 2); ctx.bezierCurveTo(bx - cw * 1.1, by - ch * 0.4, bx + cl * 0.5 - cw * 0.3, by - ch * 0.7, bx + cl, by - ch);
-          ctx.bezierCurveTo(bx + cl * 0.5 + cw * 0.4, by - ch * 0.65, bx + cw * 1.2, by - ch * 0.3, bx + cw, by + 2); }
-        ctx.closePath(); ctx.fill(); ctx.restore();
+        // v12 living fire (see FLAME module): irregular painted tongues, light pool + embers + smoke wisp in sync
+        FL_SP.push(bx, by, i);
+        BRAZ.f[BRAZ.n - 1] = (flameDraw(bx, by, i, { scale: 1.15, glow: 76, par: mp }) - 0.5) * 26;
       }
     }
 
+    flameParticles(FL_SP, frameDt, mp);
     ambientDraw('mid');
 
     // 4. Level paving-stone arena floor: horizontal perspective strips, pre-rendered once per layout, scrolled 1:1 with the camera
@@ -2067,6 +2047,179 @@
   const BRAZ = { x: new Float32Array(16), f: new Float32Array(16), n: 0 };
   const PILL = { x: new Float32Array(16), w: new Float32Array(16), i: new Int32Array(16), n: 0 };
   const BAKED = { ready: false };
+  const FL_SP = [];
+  // ---------------------------------------------------------------------------
+  // FLAME module (v12). One reusable fire for every brazier now and every torch later:
+  //   FLAME.draw(x, y, seed, o)  -> body + light pool + embers + smoke wisp, base of the fire at screen (x, y)
+  // The fire is a baked, painted, seamless loop of FL_N frames (irregular tongues of different heights that lick,
+  // lean and flare, each frame a different shape: outer deep red -> orange -> yellow -> near-white core). Playback
+  // layers two independent loops (different speed, mirrored, offset by a per-flame seed) and cross-fades between
+  // neighbouring frames, so the shape on screen never repeats. It reports its own intensity (0..1) which drives the
+  // light pool, so the light and the flame pulse together. Time-based only; nothing depends on the quality tier.
+  // ---------------------------------------------------------------------------
+  const FL_N = 32, FL_CW = 112, FL_CH = 176, FL_COLS = 8, FL_BASE = 166, FL_SCALE = 0.5;   // atlas cell (2x of the 56 x 88 on-screen size)
+  const FLAME = {
+    atlas: null, atlasM: null, inten: new Float32Array(FL_N), baked: 0, fps: 15,
+    emb: { n: 0, x: new Float32Array(56), y: new Float32Array(56), vx: new Float32Array(56), vy: new Float32Array(56), life: new Float32Array(56), max: new Float32Array(56), s: new Float32Array(56), par: new Float32Array(56) },
+    smk: { n: 0, x: new Float32Array(24), y: new Float32Array(24), vx: new Float32Array(24), vy: new Float32Array(24), life: new Float32Array(24), max: new Float32Array(24), s: new Float32Array(24), par: new Float32Array(24) },
+    lastT: 0, acc: new Float32Array(32), tex: null
+  };
+  // tongue table: x offset, base half-width, rest height (cell units), two flicker harmonics, lick harmonic, phases
+  const FL_T = [
+    [-31,  9,  50, 3, 7, 2, 0.05, 0.40, 0.10], [-20, 12,  80, 4, 5, 3, 0.55, 0.15, 0.62], [-10, 15, 104, 2, 6, 3, 0.30, 0.80, 0.25],
+    [  0, 19, 134, 3, 5, 2, 0.85, 0.35, 0.48], [ 10, 15,  98, 4, 7, 3, 0.15, 0.60, 0.88], [ 20, 12,  76, 2, 6, 2, 0.70, 0.05, 0.33],
+    [ 31,  9,  46, 3, 5, 3, 0.45, 0.90, 0.71]
+  ];
+  function flTongue(c, x, by, h, w, lean, wob) {
+    c.beginPath(); c.moveTo(x - w, by);
+    c.bezierCurveTo(x - w * 1.15 + lean * 0.15 + wob, by - h * 0.38, x + lean * 0.55 - w * 0.35, by - h * 0.72, x + lean, by - h);
+    c.bezierCurveTo(x + lean * 0.7 + w * 0.4, by - h * 0.70, x + w * 1.2 + lean * 0.2 - wob, by - h * 0.36, x + w, by);
+    c.closePath();
+  }
+  function flFrame(c, f, ox, oy) {                       // paint frame f (0..FL_N-1) into the cell at (ox, oy)
+    const P = f / FL_N, TAU = Math.PI * 2, bx = ox + FL_CW / 2, by = oy + FL_BASE;
+    const hs = new Array(FL_T.length), ls = new Array(FL_T.length), ws = new Array(FL_T.length);
+    let tot = 0, rest = 0;
+    for (let k = 0; k < FL_T.length; k++) {
+      const T = FL_T[k];
+      const a = Math.sin(TAU * (T[3] * P + T[6])), b = Math.sin(TAU * (T[4] * P + T[7]));
+      const lickS = Math.max(0, Math.sin(TAU * (T[5] * P + T[8])));
+      const lick = lickS * lickS * lickS * lickS * lickS * lickS;
+      const h = T[2] * (0.80 + 0.16 * a + 0.10 * b + 0.30 * lick);
+      hs[k] = h; tot += h * T[1]; rest += T[2] * T[1];
+      ls[k] = Math.sign(T[0]) * 6 + Math.sin(TAU * (T[5] * P + T[7])) * (9 + T[1] * 0.5) + Math.sin(TAU * P + 1.0) * 6 * (0.4 + T[2] / 134);
+      ws[k] = T[1] * (0.92 + 0.10 * b);
+    }
+    FLAME.inten[f] = Math.max(0, Math.min(1, 0.5 + (tot / rest - 0.84) * 3.4));
+    c.save(); c.beginPath(); c.rect(ox, oy, FL_CW, FL_CH); c.clip();
+    const layer = (sw, sh, stops, only) => {
+      for (let k = 0; k < FL_T.length; k++) {
+        if (only && hs[k] < only) continue;
+        const h = hs[k] * sh, g = c.createLinearGradient(0, by, 0, by - h);
+        for (let i = 0; i < stops.length; i++) g.addColorStop(stops[i][0], stops[i][1]);
+        c.fillStyle = g;
+        flTongue(c, bx + FL_T[k][0] * (sw > 0.6 ? 1 : 0.8), by + 3 - (1 - sh) * 4, h, ws[k] * sw, ls[k] * (0.55 + 0.45 * sh), Math.sin(TAU * (f / FL_N * 3 + k * 0.37)) * 2.2);
+        c.fill();
+      }
+    };
+    // hot bed at the root
+    let g = c.createRadialGradient(bx, by - 2, 2, bx, by - 2, 36);
+    g.addColorStop(0, 'rgba(255, 200, 80, 0.95)'); g.addColorStop(0.5, 'rgba(240, 100, 20, 0.7)'); g.addColorStop(1, 'rgba(180, 30, 6, 0)');
+    c.save(); c.translate(bx, by - 2); c.scale(1, 0.42); c.translate(-bx, -(by - 2)); c.fillStyle = g; c.fillRect(bx - 40, by - 42, 80, 80); c.restore();
+    c.shadowColor = 'rgba(255, 60, 10, 0.9)'; c.shadowBlur = 16;                                   // 1. outer: deep red edge, a soft smoky-red halo rather than a line
+    layer(1.28, 1.08, [[0, 'rgba(196, 46, 10, 0.62)'], [0.5, 'rgba(168, 32, 8, 0.50)'], [1, 'rgba(104, 12, 5, 0)']]);
+    c.shadowColor = 'rgba(255, 100, 18, 0.85)'; c.shadowBlur = 5;
+    layer(0.98, 1.0, [[0, 'rgba(255, 138, 28, 1)'], [0.45, 'rgba(250, 104, 20, 0.96)'], [0.85, 'rgba(226, 58, 12, 0.5)'], [1, 'rgba(210, 40, 8, 0)']]);   // 2. orange body
+    c.shadowBlur = 0;
+    layer(0.66, 0.80, [[0, 'rgba(255, 224, 110, 1)'], [0.5, 'rgba(255, 184, 52, 0.95)'], [0.9, 'rgba(255, 130, 28, 0.4)'], [1, 'rgba(255, 120, 24, 0)']]);   // 3. yellow
+    c.shadowColor = 'rgba(255, 240, 170, 0.9)'; c.shadowBlur = 5;
+    layer(0.36, 0.52, [[0, 'rgba(255, 253, 232, 1)'], [0.6, 'rgba(255, 238, 160, 0.9)'], [1, 'rgba(255, 205, 90, 0)']], 60);                                // 4. near-white core
+    c.restore();
+  }
+  function flBakeStep(n) {                                // bake n more frames; called from the frame loop until all FL_N exist
+    if (!FLAME.atlas) FLAME.atlas = makeCanvas(FL_COLS * FL_CW, Math.ceil(FL_N / FL_COLS) * FL_CH);
+    const c = FLAME.atlas.getContext('2d');
+    for (let i = 0; i < n && FLAME.baked < FL_N; i++, FLAME.baked++) flFrame(c, FLAME.baked, (FLAME.baked % FL_COLS) * FL_CW, Math.floor(FLAME.baked / FL_COLS) * FL_CH);
+    if (FLAME.baked >= FL_N && !FLAME.tex) {
+      const A = FLAME.atlas, M = FLAME.atlasM = makeCanvas(A.width, A.height), mc = M.getContext('2d');      // mirrored copy: layer B needs no per-frame transform
+      for (let f = 0; f < FL_N; f++) { const ox = (f % FL_COLS) * FL_CW, oy = Math.floor(f / FL_COLS) * FL_CH; mc.save(); mc.translate(ox + FL_CW, oy); mc.scale(-1, 1); mc.drawImage(A, ox, oy, FL_CW, FL_CH, 0, 0, FL_CW, FL_CH); mc.restore(); }
+      const e = makeCanvas(16, 16), ec = e.getContext('2d'), s = makeCanvas(64, 64), sc = s.getContext('2d');
+      let g = ec.createRadialGradient(8, 8, 0, 8, 8, 8);
+      g.addColorStop(0, 'rgba(255, 250, 215, 1)'); g.addColorStop(0.35, 'rgba(255, 190, 70, 0.9)'); g.addColorStop(1, 'rgba(255, 90, 20, 0)');
+      ec.fillStyle = g; ec.fillRect(0, 0, 16, 16);
+      g = sc.createRadialGradient(32, 32, 1, 32, 32, 30);
+      g.addColorStop(0, 'rgba(70, 44, 32, 0.50)'); g.addColorStop(0.6, 'rgba(64, 40, 30, 0.22)'); g.addColorStop(1, 'rgba(58, 36, 28, 0)');
+      sc.fillStyle = g; sc.fillRect(0, 0, 64, 64);
+      const gl = makeCanvas(96, 96), gc = gl.getContext('2d');                                  // compact light halo: same colour ramp as BAKED.glow, energy pulled inward so the quad can be ~35% smaller
+      g = gc.createRadialGradient(48, 48, 1, 48, 48, 48);
+      g.addColorStop(0, 'rgba(255, 240, 170, 0.95)'); g.addColorStop(0.2, 'rgba(255, 150, 40, 0.58)'); g.addColorStop(0.5, 'rgba(255, 86, 14, 0.2)'); g.addColorStop(0.8, 'rgba(255, 50, 4, 0.04)'); g.addColorStop(1, 'rgba(255, 40, 0, 0)');
+      gc.fillStyle = g; gc.fillRect(0, 0, 96, 96);
+      FLAME.tex = { ember: e, smoke: s, glow: gl };
+    }
+  }
+  // frame lookup with a cross-fade between neighbours: returns frame a, frame b, mix, and writes intensity to FLAME.cur
+  function flPick(pos) {
+    const n = FL_N, p = ((pos % n) + n) % n, a = Math.floor(p), m = p - a, b = (a + 1) % n;
+    FLAME.cur = FLAME.inten[a] * (1 - m) + FLAME.inten[b] * m;
+    FLAME.a = a; FLAME.b = b; FLAME.m = m;
+  }
+  function flBlit(a, b, m, x, y, sx, sy, alpha, mirror) {
+    const W2 = FL_CW * FL_SCALE * sx, H2 = FL_CH * FL_SCALE * sy, top = y - FL_BASE * FL_SCALE * sy, dx = x - W2 / 2, A = mirror ? FLAME.atlasM : FLAME.atlas;
+    ctx.globalAlpha = alpha;
+    ctx.drawImage(A, (a % FL_COLS) * FL_CW, Math.floor(a / FL_COLS) * FL_CH, FL_CW, FL_CH, dx, top, W2, H2);
+    if (m > 0.04) { ctx.globalAlpha = alpha * m; ctx.drawImage(A, (b % FL_COLS) * FL_CW, Math.floor(b / FL_COLS) * FL_CH, FL_CW, FL_CH, dx, top, W2, H2); }
+    ctx.globalAlpha = 1;
+  }
+  // draw one fire. x,y: screen position of the base. par: parallax of the layer it sits in (embers/smoke stay in that layer)
+  // o: { scale, glow (light pool radius), embers (per second), smoke (per second), par }
+  function flameDraw(x, y, seed, o) {
+    if (!FLAME.tex) return 0.5;
+    const t = worldTime, sc = (o && o.scale) || 1, par = (o && o.par != null) ? o.par : 0.65;
+    const spd = 0.92 + (Math.abs(seed) * 0.37 % 1) * 0.26, off = seed * 7.3;
+    flPick(t * FLAME.fps * spd + off);                         // layer A: the main fire
+    const iA = FLAME.cur, aA = FLAME.a, bA = FLAME.b, mA = FLAME.m;
+    flPick(t * FLAME.fps * 0.61 * spd + off * 1.7 + 13);        // layer B: a second, slower loop, mirrored, behind and a bit lower
+    const iB = FLAME.cur;
+    const inten = iA * 0.65 + iB * 0.35;
+    // light pool: radius and brightness follow the flame (sync with the intensity the shapes were baked with)
+    const breath = 0.5 + 0.5 * Math.sin(t * 1.9 + seed * 2.1);
+    const gr = ((o && o.glow) || 72) * (0.82 + 0.34 * inten + 0.12 * breath);
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = Math.max(0.3, Math.min(1, 0.40 + 0.46 * inten + 0.16 * breath));
+    ctx.drawImage(FLAME.tex.glow, x - gr, y - 14 * sc - gr, gr * 2, gr * 2);
+    ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+    flBlit(FLAME.a, FLAME.b, FLAME.m, x + 1, y + 3, 0.86 * sc, 0.92 * sc, 0.78, true);   // (flPick above left layer B in FLAME.a/b/m)
+    flBlit(aA, bA, mA, x, y + 2, sc, sc, 1, false);
+    return inten;
+  }
+  // embers + smoke wisps: spawn from the flames that were on screen last frame, advance, and draw. Stored in the
+  // parallax layer's own coordinates (world-ish x), so they stay with their flame as the camera moves.
+  function flameParticles(spawnList, dt, layerPar) {
+    const E = FLAME.emb, S = FLAME.smk, T = FLAME.tex;
+    if (!T) return;
+    const wind = (typeof ENV !== 'undefined' ? ENV.ws : 0) * 0.5;
+    dt = Math.min(dt, 0.05);
+    for (let i = 0; i < spawnList.length; i += 3) {
+      const sx = spawnList[i], sy = spawnList[i + 1], k = (i / 3) | 0;
+      if (sx < -40 || sx > W + 40) continue;
+      FLAME.acc[k] += dt * 5; FLAME.acc[16 + k] += dt * 1.0;
+      while (FLAME.acc[k] >= 1) {                                      // ember
+        FLAME.acc[k] -= 1;
+        const j = E.n < E.x.length ? E.n++ : (Math.random() * E.x.length) | 0;
+        E.x[j] = sx + camX * layerPar + (Math.random() - 0.5) * 22; E.y[j] = sy - 14 - Math.random() * 26;
+        E.vx[j] = (Math.random() - 0.5) * 16 + wind * 0.4; E.vy[j] = -(26 + Math.random() * 44);
+        E.max[j] = E.life[j] = 1.0 + Math.random() * 1.3; E.s[j] = 1.2 + Math.random() * 1.9;
+      }
+      while (FLAME.acc[16 + k] >= 1) {                                 // smoke wisp
+        FLAME.acc[16 + k] -= 1;
+        const j = S.n < S.x.length ? S.n++ : (Math.random() * S.x.length) | 0;
+        S.x[j] = sx + camX * layerPar + (Math.random() - 0.5) * 10; S.y[j] = sy - 60;
+        S.vx[j] = -6 + wind + (Math.random() - 0.5) * 8; S.vy[j] = -(15 + Math.random() * 10);
+        S.max[j] = S.life[j] = 2.6 + Math.random() * 1.6; S.s[j] = 10 + Math.random() * 6;
+      }
+    }
+    ctx.save();
+    for (let i = S.n - 1; i >= 0; i--) {                               // smoke first (behind the sparks), faint
+      S.life[i] -= dt;
+      if (S.life[i] <= 0) { const l = --S.n; S.x[i] = S.x[l]; S.y[i] = S.y[l]; S.vx[i] = S.vx[l]; S.vy[i] = S.vy[l]; S.life[i] = S.life[l]; S.max[i] = S.max[l]; S.s[i] = S.s[l]; continue; }
+      const u = 1 - S.life[i] / S.max[i];
+      S.x[i] += (S.vx[i] + Math.sin(S.y[i] * 0.05 + i) * 5) * dt; S.y[i] += S.vy[i] * dt;
+      const r = S.s[i] * (1 + u * 1.5), a = Math.sin(Math.min(1, u * 1.2) * Math.PI) * 0.55;
+      ctx.globalAlpha = a; ctx.drawImage(T.smoke, S.x[i] - camX * layerPar - r, S.y[i] - r, r * 2, r * 2);
+    }
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = E.n - 1; i >= 0; i--) {
+      E.life[i] -= dt;
+      if (E.life[i] <= 0) { const l = --E.n; E.x[i] = E.x[l]; E.y[i] = E.y[l]; E.vx[i] = E.vx[l]; E.vy[i] = E.vy[l]; E.life[i] = E.life[l]; E.max[i] = E.max[l]; E.s[i] = E.s[l]; continue; }
+      const u = 1 - E.life[i] / E.max[i];
+      E.x[i] += (E.vx[i] + Math.sin(worldTime * 5 + i * 1.7) * 9) * dt; E.y[i] += E.vy[i] * dt;
+      const r = E.s[i] * (1 - u * 0.55) * 2.2;
+      ctx.globalAlpha = Math.min(1, (1 - u) * 1.6) * (0.65 + 0.35 * Math.sin(worldTime * 24 + i * 3.1));
+      ctx.drawImage(T.ember, E.x[i] - camX * layerPar - r, E.y[i] - r, r * 2, r * 2);
+    }
+    ctx.restore();
+  }
+
   function bakeFx() {
     const glow = makeCanvas(128, 128), g2 = glow.getContext('2d');
     let gr = g2.createRadialGradient(64, 64, 2, 64, 64, 64);
@@ -2079,16 +2232,6 @@
     gr.addColorStop(0, 'rgba(14, 4, 1, 0.9)'); gr.addColorStop(0.55, 'rgba(14, 4, 1, 0.55)'); gr.addColorStop(1, 'rgba(14, 4, 1, 0)');
     s2.fillStyle = gr; s2.fillRect(0, 0, 96, 96);
     BAKED.shadow = sh2;
-    { // soft flame tongue (teardrop, hot at the root, fading to a pale tip), drawn stretched/skewed per frame
-      const cv = makeCanvas(64, 128), c = cv.getContext('2d');
-      c.shadowColor = 'rgba(255, 130, 30, 0.9)'; c.shadowBlur = 7;
-      const g = c.createLinearGradient(0, 8, 0, 120);
-      g.addColorStop(0, 'rgba(255, 226, 140, 0)'); g.addColorStop(0.22, 'rgba(255, 196, 80, 0.80)');
-      g.addColorStop(0.65, 'rgba(255, 132, 28, 0.95)'); g.addColorStop(1, 'rgba(232, 74, 12, 0.95)');
-      c.fillStyle = g; c.beginPath(); c.moveTo(12, 118);
-      c.bezierCurveTo(8, 84, 24, 52, 32, 8); c.bezierCurveTo(40, 52, 56, 84, 52, 118); c.closePath(); c.fill();
-      BAKED.flame = cv;
-    }
     // soft sand drift decal (warm, slightly lighter than the paving)
     const sd = makeCanvas(256, 64), s3 = sd.getContext('2d');
     s3.translate(128, 32); s3.scale(1, 0.25);
@@ -2154,7 +2297,7 @@
   const IDLE_FX = { k: 0, cape: 0, check: 0 };                       // read by the actor renderer (written by idleLife)
   const AMBX = { idx: -1, level: null, fade: 2.2, dirty: true, warned: {}, lists: { sky: [], far: [], mid: [], floor: [], behind: [], front: [] }, events: {} };
   const AMBTEX = {};
-  const SKYC = { img: null, sc: 1, sunX: 0, ay: 0, skyH: 0, VX: 0, VY: 0 };
+  const SKYC = { covered: false, skipped: false, img: null, sc: 1, sunX: 0, ay: 0, skyH: 0, VX: 0, VY: 0 };
   function seeded(seed) { let s = seed >>> 0; return () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296; }
   function range(r) { return r[0] + Math.random() * (r[1] - r[0]); }
   function registerAmbient(name, mod) {
@@ -2388,34 +2531,60 @@
   });
 
   // ---------------------------------------------------------------- SKY
-  registerAmbient('vortexSpin', {                // the fire vortex turns around its eye (~4 deg/s) and the eye glow pulses
+  registerAmbient('vortexSpin', {                // the WHOLE painted sky turns around the vortex eye (v12: outer bands too) and the eye glow pulses
     order: 10, defaults: { speed: 0.075, pulse: 1 },
-    start(inst) { const d = inst.d || (inst.d = { key: '', src: null }); d.ang = worldTime * inst.p.speed; },
-    update(inst, dt) { inst.d.ang += inst.p.speed * dt; },
+    // Bands, from the eye outward, each a feathered disk of the same painted sky picture turning at a fraction of `speed`
+    // (decreasing with radius, like a cyclone): core x1.0, inner band x0.80, mid band x0.62, outer band x0.46. They are
+    // composited into ONE eye-centred buffer at ~0.9 of the picture's own pixel density (the painting is soft: ~1 source px per
+    // screen px), refreshed 15 times a second, and that buffer is blitted once per frame at the sky's
+    // parallax position. The static sky blit is skipped while this buffer covers it.
+    start(inst) { const d = inst.d || (inst.d = { key: '', src: null }); d.ang = worldTime * inst.p.speed; d.rings = null; d.key = ''; },
+    update(inst, dt) { const V = inst.d, sp = inst.p.speed; V.ang += sp * dt; if (V.rings) for (const Rg of V.rings) if (Rg.ok) Rg.ang += sp * Rg.sp * dt; },
     draw: {
       sky(inst, S) {
         const V = inst.d, fx = canvas.width / W;
-        const R = Math.round(Math.min(S.skyH * 0.56, W * 0.24)), D = Math.round(2 * R * fx), key = R + ':' + D + ':' + S.sc.toFixed(4);
-        if (V.key !== key) {                                           // one feathered disk of the painted vortex, baked per layout
-          V.key = key; V.src = makeCanvas(D, D);
-          const c = V.src.getContext('2d'), iw = S.img.naturalWidth, ih = S.img.naturalHeight, rs = R / S.sc;
-          c.drawImage(S.img, S.VX * iw - rs, S.VY * ih - rs, 2 * rs, 2 * rs, 0, 0, D, D);
+        const R = Math.round(Math.min(S.skyH * 0.56, W * 0.24)), dn = Math.min(fx * 0.75, 0.9 / S.sc);        // dn: buffer px per logical px
+        const mg = 10, cw = Math.ceil((W + 2 * mg) * dn), ch = Math.ceil(S.skyH * dn);   // the buffer covers only the visible window (+ a small margin for the sky's slow parallax between refreshes)
+        const key = [R, dn.toFixed(3), S.sc.toFixed(4), S.skyH, W, cw].join(':');
+        if (V.key !== key) {
+          V.key = key; V.rings = null; V.rb = 0; V.ok = false; V.cv = makeCanvas(cw, ch); V.bv = makeCanvas(cw, ch); V.bc = V.bv.getContext('2d'); V.stage = -1; V.next = 0;
+          const rmax = Math.hypot(W * 0.74 + 230, S.skyH * 0.62);
+          V.rings = [{ rho: rmax, fi: 0.86, sp: 0.46 }, { rho: R * 3.4, fi: 0.62, sp: 0.62 }, { rho: R * 2.2, fi: 0.62, sp: 0.80 }, { rho: R, fi: 0.54, sp: 1.0 }];
+          for (const Rg of V.rings) Rg.ang = worldTime * inst.p.speed * Rg.sp;
+          SKYC.covered = false;
+        }
+        if (V.rb < V.rings.length) {                                                 // bake one band per frame (no hitch)
+          const Rg = V.rings[V.rb++], Dq = Math.max(8, Math.round(2 * Rg.rho * dn));
+          Rg.tex = makeCanvas(Dq, Dq);
+          const c = Rg.tex.getContext('2d'), iw = S.img.naturalWidth, ih = S.img.naturalHeight, rs = Rg.rho / S.sc;
+          c.drawImage(S.img, S.VX * iw - rs, S.VY * ih - rs, 2 * rs, 2 * rs, 0, 0, Dq, Dq);
           c.globalCompositeOperation = 'destination-in';
-          const g = c.createRadialGradient(D / 2, D / 2, D * 0.27, D / 2, D / 2, D * 0.5);
+          const g = c.createRadialGradient(Dq / 2, Dq / 2, Dq * 0.5 * Rg.fi, Dq / 2, Dq / 2, Dq * 0.5);
           g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
-          c.fillStyle = g; c.fillRect(0, 0, D, D);
-          PERF_SKIP = true;
+          c.fillStyle = g; c.fillRect(0, 0, Dq, Dq);
+          Rg.ok = true; PERF_SKIP = true;
+          if (V.rb >= V.rings.length) V.next = 0;
         }
-        if (!V.rot || V.rot.width !== D) { V.rot = makeCanvas(D, D); V.rc = V.rot.getContext('2d'); V.next = 0; }
-        if (worldTime >= V.next || worldTime < V.next - 1) {            // re-turn the disk 15 times a second (about 1 px of travel per step at the rim, which is feathered out), time-based
-          V.next = worldTime + 1 / 15;
-          V.rc.setTransform(1, 0, 0, 1, 0, 0); V.rc.clearRect(0, 0, D, D);
-          V.rc.translate(D / 2, D / 2); V.rc.rotate(V.ang); V.rc.drawImage(V.src, -D / 2, -D / 2);
+        const fb = () => { if (SKYC.skipped) ctx.drawImage(S.img, S.sunX - S.VX * S.img.naturalWidth * S.sc, S.ay - S.VY * S.img.naturalHeight * S.sc, S.img.naturalWidth * S.sc, S.img.naturalHeight * S.sc); };
+        if (V.rb < V.rings.length) { fb(); return; }                                // static sky stays until all bands exist
+        // refresh ~15x/s, but spread over five frames (one draw per frame into a back buffer, then swap) so no frame carries the whole cost
+        if (V.stage < 0 && (worldTime >= V.next || worldTime < V.next - 1)) { V.stage = 0; V.angs = V.rings.map(r => r.ang); V.sx0 = S.sunX; }
+        if (V.stage >= 0) {
+          const c = V.bc, ex = (V.sx0 + mg) * dn, ey = S.ay * dn, iw = S.img.naturalWidth, ih = S.img.naturalHeight, dW = iw * S.sc * dn, dH = ih * S.sc * dn;
+          c.setTransform(1, 0, 0, 1, 0, 0);
+          if (V.stage === 0) c.drawImage(S.img, ex - S.VX * dW, ey - S.VY * dH, dW, dH);   // stage 0: the painted sky, static base
+          else { const Rg = V.rings[V.stage - 1], r = Rg.rho * dn;                           // stages 1..n: bands, outermost first
+            c.setTransform(1, 0, 0, 1, ex, ey); c.rotate(V.angs[V.stage - 1]); c.drawImage(Rg.tex, -r, -r, 2 * r, 2 * r); }
+          if (!V.px) V.px = makeCanvas(1, 1).getContext('2d');
+          V.px.drawImage(V.bv, 0, 0, 1, 1);                                                  // use the buffer as a source now: canvas work is deferred, this makes THIS frame pay for THIS stage (not the swap frame)
+          if (++V.stage > V.rings.length) { const t = V.cv; V.cv = V.bv; V.bv = t; V.bc = V.bv.getContext('2d'); V.stage = -1; V.next = worldTime + 1 / 15; V.ok = true; V.sxF = V.sx0; }
         }
+        if (!V.ok) { fb(); return; }
         ctx.globalAlpha = inst.k;
-        ctx.drawImage(V.rot, Math.round((S.sunX - R) * fx) / fx, Math.round((S.ay - R) * fx) / fx, D / fx, D / fx);
+        ctx.drawImage(V.cv, Math.round((S.sunX - V.sxF - mg) * fx) / fx, 0, cw / dn, ch / dn);
         ctx.globalAlpha = 1;
-        const pu = inst.p.pulse * inst.k;                              // the eye breathes: radius and brightness
+        SKYC.covered = inst.k > 0.999;
+        const pu = inst.p.pulse * inst.k;                                            // the eye breathes: radius and brightness
         if (pu > 0.01 && BAKED.glow) {
           const t = worldTime, r = 80 * (1 + 0.16 * Math.sin(t * 1.3)), a = pu * (0.20 + 0.13 * Math.sin(t * 1.3 + 0.7) + 0.04 * Math.sin(t * 3.3));
           ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = Math.max(0, a);
@@ -3381,7 +3550,12 @@
   }
 
   function drawUrn(u) {
-    if (u.broken) return;
+    if (u.broken) {                                         // v12: the painted remains stay on the ground (no collision), item lies beside them
+      const k = Math.min(1, (worldTime - (u.brokeT || 0)) / 0.18), sq = 1 - 0.22 * (1 - k) * (1 - k);
+      drawGroundShadow(u.x - 20, u.z, 25, 7, 0);
+      if (drawWorldSprite('prop_urnbroken', u.x - 20, u.z - 1, 0, 1, 43, { cast: true, squashY: sq })) return;
+      return;
+    }
     const sx = u.x - camX, sy = u.z;
     drawGroundShadow(u.x, u.z, 16, 6, 0);
     if (drawWorldSprite('urn', u.x, u.z, 0, 1, 52, { cast: true })) return;
@@ -3679,15 +3853,20 @@
   }
 
   function drawPickup(pk) {
-    const sx = pk.x - camX, sy = pk.z - 14 + Math.sin(pk.bob) * 5;
-    drawGroundShadow(pk.x, pk.z, 9, 3.5, 10 + Math.sin(pk.bob) * 5);
-    const gl = ctx.createRadialGradient(sx, sy, 3, sx, sy, 22);
-    gl.addColorStop(0, pk.type === 'meat' ? 'rgba(120, 255, 140, 0.55)' : 'rgba(255, 215, 70, 0.65)');
+    // v12: painted objects lying in the scene (same sun, relit like every sprite, projected cast shadow + contact shadow).
+    // A short hop out of the broken pot, then a very small settle-bob; a soft pulsing glow keeps it findable.
+    const age = pk.age || 0, hop = age < 0.42 ? Math.sin(Math.PI * age / 0.42) * 24 : 0, bob = Math.sin(pk.bob) * 1.4;
+    const meat = pk.type === 'meat', px = pk.x + 9, lift = hop + 0.5 + (age >= 0.42 ? bob + 1.4 : 0);
+    const name = meat ? 'prop_meat' : 'prop_chalice', dh = meat ? 34 : 40;
+    drawGroundShadow(px, pk.z, meat ? 15 : 11, meat ? 5 : 4, lift);
+    const sx = px - camX, sy = pk.z - dh * 0.45 - lift, pul = 0.78 + 0.22 * Math.sin(worldTime * 3.4 + pk.x);
+    const gl = ctx.createRadialGradient(sx, sy, 3, sx, sy, 28);
+    gl.addColorStop(0, meat ? 'rgba(130, 255, 150, ' + (0.34 * pul) + ')' : 'rgba(255, 220, 90, ' + (0.42 * pul) + ')');
     gl.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = gl;
-    ctx.beginPath(); ctx.arc(sx, sy, 22, 0, Math.PI * 2); ctx.fill();
-
-    if (pk.type === 'meat') {
+    ctx.beginPath(); ctx.arc(sx, sy, 28, 0, Math.PI * 2); ctx.fill();
+    if (drawWorldSprite(name, px, pk.z, lift, 1, dh, { cast: true })) return;
+    if (meat) {
       ctx.fillStyle = '#a8341c';
       ctx.beginPath(); ctx.ellipse(sx, sy, 13, 8, -0.2, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = '#f5eedc';
@@ -4137,10 +4316,11 @@
       ctx.restore();
     }
     if (LOAD.ready && !BAKED.ready) bakeLateArt();
+    if (FLAME.baked < FL_N && BAKED.glow) { flBakeStep(4); PERF_SKIP = true; }
     if (LITQ.length) { bakeLitOne(); PERF_SKIP = true; }
     else if (LOAD.ready && !LIT_PRE && gameState !== 'playing') {   // pre-light the sprites this screen will use
       LIT_PRE = true;
-      for (const k of ['mzcookie_idle', 'mzcookie_attack', 'thebeard_idle', 'thebeard_attack', 'marauder', 'shield', 'zealot', 'boss', 'urn',
+      for (const k of ['mzcookie_idle', 'mzcookie_attack', 'thebeard_idle', 'thebeard_attack', 'marauder', 'shield', 'zealot', 'boss', 'urn', 'prop_urnbroken', 'prop_meat', 'prop_chalice',
                        'walk_mzcookie', 'walk_thebeard', 'walk_marauder', 'walk_shield', 'walk_zealot', 'walk_boss'])
         for (const h of [52, 112, 121, 124, 132, 183]) pickImg(k, h);
     }
@@ -4162,7 +4342,7 @@
 
     // Depth-sorted entities (Urns, Pickups, Player, Enemies) — pooled, allocation-free
     RLs.length = 0; RLn = 0;
-    for (const u of urns) if (!u.broken) rlPush(u.z, 1, u);
+    for (const u of urns) rlPush(u.broken ? u.z - 1 : u.z, 1, u);
     for (const pk of pickups) rlPush(pk.z, 2, pk);
     for (const e of enemies) rlPush(e.z, 3, e);
     rlPush(player.z, 4, player);
