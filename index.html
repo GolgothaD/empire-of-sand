@@ -1986,27 +1986,27 @@
     const pil = IMG.pillar;
     BAKED.pAspect = pil.naturalWidth / pil.naturalHeight;
     BAKED.bAspect = IMG.brazier.naturalWidth / IMG.brazier.naturalHeight;
-    // far colonnade: smaller, hazed toward the sky colour
-    const fw = 64, fh = Math.round(fw / BAKED.pAspect);
-    const far = makeCanvas(fw, fh), fc = far.getContext('2d');
-    fc.drawImage(pil, 0, 0, fw, fh);
+    // far colonnade: fully opaque, same painted pillar as the mid-ground, lit with warm right-hand
+    // sun and a shadow side, then tinted toward the haze colour (no transparency — that was the ghost look).
+    const fh = 150, fw = fh * BAKED.pAspect, sc = 2;
+    const bw = Math.round(fw * sc), bh = Math.round(fh * sc);
+    const src = makeCanvas(bw, bh), sctx = src.getContext('2d');
+    sctx.imageSmoothingEnabled = true; sctx.imageSmoothingQuality = 'high';
+    sctx.drawImage(pil, 0, 0, bw, bh);
+    const far = makeCanvas(bw, bh), fc = far.getContext('2d');
+    fc.drawImage(src, 0, 0);
     fc.globalCompositeOperation = 'source-atop';
-    fc.fillStyle = 'rgba(236, 150, 82, 0.55)'; fc.fillRect(0, 0, fw, fh);
+    const lg = fc.createLinearGradient(0, 0, bw, 0);
+    lg.addColorStop(0.00, 'rgba(48, 12, 2, 0.40)');
+    lg.addColorStop(0.22, 'rgba(48, 12, 2, 0.16)');
+    lg.addColorStop(0.55, 'rgba(0, 0, 0, 0)');
+    lg.addColorStop(0.82, 'rgba(255, 210, 140, 0.10)');
+    lg.addColorStop(1.00, 'rgba(255, 228, 170, 0.24)');
+    fc.fillStyle = lg; fc.fillRect(0, 0, bw, bh);
+    fc.fillStyle = 'rgba(232, 158, 88, 0.22)'; fc.fillRect(0, 0, bw, bh);
+    fc.globalCompositeOperation = 'destination-in';
+    fc.drawImage(src, 0, 0);   // keep the original opaque coverage
     BAKED.farPillar = far;
-    // foreground stump silhouette: dark, softened (cheap blur via down/up-scale), warm rim
-    const sw = 140, sh = Math.round(sw / BAKED.pAspect);
-    const tiny = makeCanvas(Math.round(sw / 3), Math.round(sh / 3)), tc = tiny.getContext('2d');
-    tc.drawImage(pil, 0, 0, tiny.width, tiny.height);
-    tc.globalCompositeOperation = 'source-atop';
-    tc.fillStyle = 'rgb(16, 7, 3)'; tc.fillRect(0, 0, tiny.width, tiny.height);
-    const fg = makeCanvas(sw, sh), gc = fg.getContext('2d');
-    gc.imageSmoothingQuality = 'high';
-    gc.drawImage(tiny, 0, 0, sw, sh);
-    gc.globalCompositeOperation = 'source-atop';
-    const rg = gc.createLinearGradient(0, 0, sw, 0);
-    rg.addColorStop(0, 'rgba(0,0,0,0)'); rg.addColorStop(0.8, 'rgba(0,0,0,0)'); rg.addColorStop(1, 'rgba(255, 120, 40, 0.35)');
-    gc.fillStyle = rg; gc.fillRect(0, 0, sw, sh);
-    BAKED.fgStump = fg;
     BAKED.ready = true;
   }
 
@@ -2027,43 +2027,9 @@
     ctx.globalAlpha = 1;
   }
 
-  function drawForegroundParallax() {
-    const step = 760;
-    const start = Math.floor((camX * 1.35) / step);
-    if (BAKED.ready) {
-      const sStep = 1180, s0 = Math.floor((camX * 1.5) / sStep) - 1;
-      for (let i = s0; i <= s0 + Math.ceil(W / sStep) + 2; i++) {
-        const fx = i * sStep + 700 - camX * 1.5;
-        const img = BAKED.fgStump, sw = 118, sh = sw * img.height / img.width;
-        // only the plinth and a broken stub of a column poke up from the bottom edge
-        ctx.globalAlpha = 0.9;
-        ctx.drawImage(img, 0, img.height * 0.70, img.width, img.height * 0.30, fx, H - sh * 0.30 + 8, sw, sh * 0.30);
-        ctx.globalAlpha = 1;
-      }
-    }
-    for (let i = start; i <= start + 3; i++) {
-      if (BAKED.ready && i % 2 === 1) continue;
-      const fx = i * step + 280 - camX * 1.35;
-      ctx.fillStyle = 'rgba(14, 6, 3, 0.90)';
-      ctx.beginPath();
-      ctx.moveTo(fx - 6, H + 4);
-      ctx.lineTo(fx + 8, H - 88);
-      ctx.quadraticCurveTo(fx + 22, H - 124, fx + 36, H - 116);
-      ctx.lineTo(fx + 48, H - 78);
-      ctx.lineTo(fx + 70, H - 100);
-      ctx.quadraticCurveTo(fx + 84, H - 70, fx + 92, H + 4);
-      ctx.closePath();
-      ctx.fill();
-      ctx.fillStyle = 'rgba(8, 3, 2, 0.55)';
-      ctx.beginPath();
-      ctx.moveTo(fx + 20, H + 4);
-      ctx.lineTo(fx + 28, H - 52);
-      ctx.lineTo(fx + 44, H - 40);
-      ctx.lineTo(fx + 52, H + 4);
-      ctx.closePath();
-      ctx.fill();
-    }
-  }
+  // v4/v5/v6 drew solid-black pillar stumps and jagged rock silhouettes along the bottom edge.
+  // They overlapped the floor, the fighters' feet and the touch controls, so they are gone.
+  function drawForegroundParallax() {}
 
   // ---------------------------------------------------------------------------
   // Sprite drawing: rest poses + distance-driven walk cycles, tiered by pixel density
