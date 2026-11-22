@@ -796,7 +796,7 @@
   };
 
   // =========================================================================
-  // GAME STATE & ZONES
+  // GAME STATE & LEVELS
   // =========================================================================
   let gameState = 'title'; // 'title' | 'playing' | 'victory' | 'gameover'
 
@@ -844,11 +844,66 @@
   let bannerText = '';
   let bannerTimer = 0;
 
+  // =========================================================================
+  // LEVELS: one entry per zone. Gameplay fields (lockX, waves, boss) are unchanged from v9; the `ambient`
+  // block is pure data that the ambient registry (see "AMBIENCE IS DATA") turns into living scenery.
+  //
+  // AMBIENT SCHEMA. Every key is an effect name; its value is
+  //     false / omitted -> off (unless it is a default: wind, footstepDust, impactShock, idleLife)
+  //     true            -> on with the module's defaults
+  //     { ... }         -> on, with these options overriding the defaults (numbers glide between levels)
+  // A level needs nothing else: add an entry, declare the set, the engine instantiates it (and crossfades
+  // from the previous zone's set over `ambient.fade` seconds, default 2.2). Share sets with spread:
+  //     ambient: { ...COLONNADE_AMBIENT, wind: { strength: 2 }, banners: false }
+  //
+  //  layer   effect             options (defaults)
+  //  -----   ----------------   --------------------------------------------------------------------------
+  //  sky     vortexSpin         speed 0.032 rad/s
+  //  sky     clouds             count 4 (max 8), speed 1, alpha 1
+  //  far     birds              count 4 (max 10), kind 'vulture' | 'crow'
+  //  far     caravans           speed 1, lone true (lone walker), start 800, loneStart 760
+  //  far     dustDevils         every [45,85] s, first 6 s, size 1 (every: false = never)
+  //  mid     banners            every 2 (pillar stride), phase 1, sway 1
+  //  mid     pillarSandTrickle  every [2.5,6] s, rate 36 grains/s, duration [1.4,2.8] s
+  //  mid     torchSmoke         anchors 'brazier' | [{x (world), y (screen), par}], rate 4.5/s, rise 32, size 1, alpha 1
+  //  mid     heatShimmer        horizon true, braziers true, strength 1
+  //  floor   waterShimmer       region {x0,x1 (world px, omit = full width), y0,y1 (0..1 of the playfield)} or [regions],
+  //                             glints 1, ripple 1, alpha 1
+  //  floor   brazierBreath      strength 1
+  //  behind  embers             count 42 (max 64)
+  //  behind  sandDrift          count 64 (max 96), fg 10 (faint foreground streaks, max 16), alpha 1
+  //  behind  dustMotes          count 36 (max 56), fg 6, size 1, alpha 1, yRange [0.14,0.9],
+  //                             shafts [{x (world), top 0, w 90, len 300, angle 0.42, alpha 0.28, par 0.65}] (motes glow inside)
+  //  behind  dragonflies        count 6 (max 12), size 1, yRange [0.46,0.72]
+  //  behind  footstepDust       size 1, alpha 1                 (default on: a puff per foot plant / landing)
+  //  behind  impactShock        size 1                          (default on: ring + dust where a heavy blow lands)
+  //  (none)  wind               dir -1 (right to left), strength 1, gustEvery [6,13] s (false = no gusts), gustStrength 1
+  //  (none)  idleLife           breath 1, weaponCheck 1, capeWind 1   (default on: actors are never statues)
+  // Layers: sky = painted sky band; far = behind the haze; mid = colonnade depth; floor = on the paving;
+  // behind = play depth, behind every fighter; front = foreground-safe (the engine keeps it off fighters and the HUD).
+  // To add an effect: registerAmbient('name', {...}) in the ambient engine, then declare it here. Nothing else.
+  // =========================================================================
   const WORLD_LEN = 3600;
-  const ZONES = [
+  const COLONNADE_AMBIENT = {
+    wind: { dir: -1, strength: 1, gustEvery: [6, 13] },
+    sandDrift: { count: 64, fg: 10 },
+    dustDevils: { every: [45, 85], first: 6 },
+    heatShimmer: { horizon: true, braziers: true, strength: 1 },
+    clouds: { count: 4, speed: 1 },
+    birds: { count: 4, kind: 'vulture' },
+    vortexSpin: { speed: 0.032 },
+    caravans: { speed: 1, lone: true },
+    banners: { every: 2, phase: 1 },
+    pillarSandTrickle: { every: [2.5, 6] },
+    brazierBreath: true,
+    embers: { count: 42 },
+    footstepDust: true, impactShock: true, idleLife: true
+  };
+  const LEVELS = [
     {
       name: 'ZONE I — THE RUINED COLONNADE',
       lockX: 620,
+      ambient: COLONNADE_AMBIENT,                                   // calm gold-hour colonnade: the v9 look
       waves: [
         [{ type: 'marauder', side: 1 }, { type: 'marauder', side: 1 }, { type: 'marauder', side: -1 }],
         [{ type: 'shield', side: 1 }, { type: 'marauder', side: 1 }, { type: 'marauder', side: -1 }, { type: 'zealot', side: 1 }]
@@ -857,6 +912,19 @@
     {
       name: 'ZONE II — SCORPION DUNES',
       lockX: 1680,
+      ambient: {                                                    // open dunes: a harder wind, more sand, dust devils, a caravan, bare pillars
+        ...COLONNADE_AMBIENT,
+        wind: { dir: -1, strength: 1.5, gustEvery: [4, 9], gustStrength: 1.4 },
+        sandDrift: { count: 92, fg: 14 },
+        dustDevils: { every: [18, 36], first: 4, size: 1.15 },
+        heatShimmer: { horizon: true, braziers: true, strength: 1.3 },
+        clouds: { count: 5, speed: 1.5 },
+        birds: { count: 3, kind: 'vulture' },
+        caravans: { speed: 1.2, lone: true },
+        banners: false,
+        pillarSandTrickle: { every: [1.5, 3.8] },
+        embers: { count: 26 }
+      },
       waves: [
         [{ type: 'zealot', side: 1 }, { type: 'shield', side: 1 }, { type: 'marauder', side: -1 }, { type: 'marauder', side: 1 }],
         [{ type: 'shield', side: 1 }, { type: 'shield', side: -1 }, { type: 'zealot', side: 1 }, { type: 'zealot', side: -1 }]
@@ -866,6 +934,20 @@
       name: 'ZONE III — GATES OF THE GREAT PYRAMID',
       lockX: 2740,
       boss: true,
+      ambient: {                                                    // boss arena: still air, vultures gathering, a quicker vortex, rising smoke and embers
+        ...COLONNADE_AMBIENT,
+        wind: { dir: -1, strength: 0.7, gustEvery: [9, 17], gustStrength: 1.2 },
+        sandDrift: { count: 40, fg: 8 },
+        dustDevils: false,
+        caravans: false,
+        heatShimmer: { horizon: true, braziers: true, strength: 1.4 },
+        clouds: { count: 3, speed: 1.3 },
+        birds: { count: 7, kind: 'vulture' },
+        vortexSpin: { speed: 0.052 },
+        torchSmoke: { anchors: 'brazier', rate: 3.5 },
+        pillarSandTrickle: { every: [1.2, 3.2] },
+        embers: { count: 64 }
+      },
       waves: [
         [{ type: 'boss', side: 1 }, { type: 'marauder', side: -1 }]
       ]
@@ -874,7 +956,7 @@
 
   // The camera can only scroll to WORLD_LEN - W, so on wide screens (W >= 960, i.e. any 16:9 desktop)
   // ZONE III's 2740 lock was never reached and the boss never spawned. Clamp each lock to what the camera can reach.
-  function lockXOf(i) { return Math.min(ZONES[i].lockX, WORLD_LEN - W); }
+  function lockXOf(i) { return Math.min(LEVELS[i].lockX, WORLD_LEN - W); }
 
   let zoneIdx = 0;
   let waveIdx = 0;
@@ -897,7 +979,7 @@
 
   function initEmbers() {
     embers = [];
-    for (let i = 0; i < 42; i++) {
+    for (let i = 0; i < 64; i++) {
       embers.push({
         x: Math.random() * 1400,
         y: Math.random() * 600,
@@ -922,6 +1004,7 @@
     gameState = 'playing';
     zoneIdx = 0; waveIdx = 0; zoneLocked = false; goArrowTimer = 0;
     camX = 0; score = 0; comboCount = 0; comboTimer = 0;
+    ambientSync(true);   // zone I's declared ambient set, applied instantly on a (re)start
     hitStop = 0; shakeMag = 0; flashAlpha = 0;
 
     roster = {
@@ -968,7 +1051,7 @@
       { x: 2660, z: LANE_TOP + 24, broken: false, drop: 'chalice' }
     ];
 
-    showBanner(ZONES[0].name, 2.5);
+    showBanner(LEVELS[0].name, 2.5);
   }
 
   // =========================================================================
@@ -1014,7 +1097,7 @@
 
   function spawnWave() {
     lastSpawnT = worldTime;
-    const z = ZONES[zoneIdx];
+    const z = LEVELS[zoneIdx];
     const w = z.waves[waveIdx];
     for (const def of w) spawnEnemy(def.type, def.side);
   }
@@ -1203,7 +1286,7 @@
     if (e.shield && attackedFromFront) {
       if (isHeavy) {
         e.shield = false;
-        spawnShock(e.x, e.z, 1.1);
+        ambientEmit('shock', e.x, e.z, 1.1);
         AudioFX.shatter();
         hitStop = Math.max(hitStop, HITSTOP.heavy);
         shakeMag = 9;
@@ -1220,7 +1303,7 @@
 
     e.hp -= dmg;
     e.hurtFlash = 0.14;
-    if (isHeavy) spawnShock(e.x, e.z, e.isBoss ? 1.3 : 1);
+    if (isHeavy) ambientEmit('shock', e.x, e.z, e.isBoss ? 1.3 : 1);
     setKnock(e, knockX * (e.isBoss ? 0.35 : 1));
     if (isHeavy && !e.isBoss) e.vy = 210;
 
@@ -1309,14 +1392,7 @@
     worldTime += dt;
     pollGamepad();
 
-    // Ambient embers
-    updateAmbient(dt);
-    for (const em of embers) {
-      em.x += em.vx * dt * (1 + AMB.gust * 1.3);
-      em.y += em.vy * dt;
-      if (em.x < -20) em.x = W + 20;
-      if (em.y < -20) em.y = H + 20;
-    }
+    updateAmbient(dt);   // ambient registry: embers, wind, drift, sky life ... all declared per level
 
     if (gameState !== 'playing') return;
 
@@ -1488,7 +1564,7 @@
         player.y = 0; player.vy = 0;
         player.landT = LAND_T;
         spawnParticles(player.x, player.z, 5, '#d49655', 85, 3);
-        for (let k = -2; k <= 2; k++) if (k) spawnPuff(player.x + k * 9, player.z, 6, k * 34, 0.5, 0.45);
+        for (let k = -2; k <= 2; k++) if (k) ambientEmit('puff', player.x + k * 9, player.z, 6, k * 34, 0.5, 0.45);
       }
     }
     if (player.y === 0 && player.vy === 0) { player.groundT = worldTime; player.jumped = false; }
@@ -1525,11 +1601,11 @@
       const targetCam = Math.max(camX, Math.min(WORLD_LEN - W, player.x - W * 0.36 + camLook));
       camX += (targetCam - camX) * Math.min(1, dt * 7);
 
-      if (zoneIdx < ZONES.length && camX >= lockXOf(zoneIdx) - 40) {
+      if (zoneIdx < LEVELS.length && camX >= lockXOf(zoneIdx) - 40) {
         zoneLocked = true;   // camera keeps easing the last few px (no snap / sudden stop)
         waveIdx = 0;
         goArrowTimer = 0;
-        if (!ZONES[zoneIdx].boss) showBanner(ZONES[zoneIdx].name, 2.0);
+        if (!LEVELS[zoneIdx].boss) showBanner(LEVELS[zoneIdx].name, 2.0);
         spawnWave();
       }
     } else {
@@ -1541,12 +1617,12 @@
       const alive = enemies.some(e => e.state !== 'dead');
       if (!alive) {
         waveIdx++;
-        if (waveIdx < ZONES[zoneIdx].waves.length) {
+        if (waveIdx < LEVELS[zoneIdx].waves.length) {
           spawnWave();
         } else {
           zoneLocked = false;
           zoneIdx++;
-          if (zoneIdx >= ZONES.length) {
+          if (zoneIdx >= LEVELS.length) {
             gameState = 'victory';
             return;
           } else {
@@ -1622,7 +1698,7 @@
       if (e.y > 0 || e.vy !== 0) {
         e.y += e.vy * dt;
         e.vy -= 1300 * dt;
-        if (e.y <= 0) { if (e.vy < -60) { spawnPuff(e.x - 10, e.z, 7, -40, 0.5, 0.45); spawnPuff(e.x + 10, e.z, 7, 40, 0.5, 0.45); } e.y = 0; e.vy = 0; }
+        if (e.y <= 0) { if (e.vy < -60) { ambientEmit('puff', e.x - 10, e.z, 7, -40, 0.5, 0.45); ambientEmit('puff', e.x + 10, e.z, 7, 40, 0.5, 0.45); } e.y = 0; e.vy = 0; }
       }
 
       const dx = player.x - e.x;
@@ -1766,8 +1842,8 @@
       const sunX = ax - SKY_PAR * Math.max(0, Math.min(camMax, camX));
       ctx.drawImage(skyImg, sunX - VX * dW, ay - VY * dH, dW, dH);
       SUN.x = sunX; SUN.y = ay;
-      drawVortexSpin(skyImg, sc, sunX, ay, skyH, VX, VY);
-      drawClouds(skyH);
+      SKYC.img = skyImg; SKYC.sc = sc; SKYC.sunX = sunX; SKYC.ay = ay; SKYC.skyH = skyH; SKYC.VX = VX; SKYC.VY = VY;
+      ambientDraw('sky', SKYC);
     } else {
       ctx.drawImage(TEX.sky, 0, 0, W, skyH);
     }
@@ -1793,7 +1869,7 @@
       ctx.restore();
     }
 
-    drawFarLife();
+    ambientDraw('far');
     const G = layoutGradients();
     const hasArt = BAKED.ready;
     // 3a. Far colonnade (slow parallax, small, hazy)
@@ -1818,8 +1894,7 @@
       if (hasArt) {
         const ph = 262, pw = ph * BAKED.pAspect;
         ctx.drawImage(IMG.pillar, wx, LANE_TOP + 12 - ph, pw, ph);
-        if (PILL.n < PILL.x.length) { PILL.x[PILL.n] = wx + pw / 2; PILL.w[PILL.n] = pw; PILL.n++; }
-        if (i % 2 !== 0) drawBanner(wx + pw * 0.5, LANE_TOP + 12 - ph + ph * 0.17, pw * 0.44, ph * 0.36, i);
+        if (PILL.n < PILL.x.length) { PILL.x[PILL.n] = wx + pw / 2; PILL.w[PILL.n] = pw; PILL.i[PILL.n] = i; PILL.n++; }
       } else {
         ctx.drawImage(TEX.pillar, wx, LANE_TOP - 200, 74, 214);
       }
@@ -1855,8 +1930,7 @@
       }
     }
 
-    drawGrains();
-    drawHeatShimmer();
+    ambientDraw('mid');
 
     // 4. Level paving-stone arena floor: horizontal perspective strips, pre-rendered once per layout, scrolled 1:1 with the camera
     if (!drawFloor()) {
@@ -1868,7 +1942,7 @@
     }
 
     drawColonnadeShadows();
-    drawBrazierPools();
+    ambientDraw('floor');
     // Warm horizon glow + floor haze toward the back wall
     ctx.fillStyle = G.horizon;
     ctx.fillRect(0, LANE_TOP - 70, W, 102);
@@ -1958,7 +2032,7 @@
     return GRAD;
   }
   const BRAZ = { x: new Float32Array(16), f: new Float32Array(16), n: 0 };
-  const PILL = { x: new Float32Array(16), w: new Float32Array(16), n: 0 };
+  const PILL = { x: new Float32Array(16), w: new Float32Array(16), i: new Int32Array(16), n: 0 };
   const BAKED = { ready: false };
   function bakeFx() {
     const glow = makeCanvas(128, 128), g2 = glow.getContext('2d');
@@ -2030,229 +2104,379 @@
   // They overlapped the floor, the fighters' feet and the touch controls, so they are gone.
 
   // =========================================================================
-  // v9 LIVING WORLD: ambient motion. Visual only; nothing here reads input or writes gameplay state.
-  // Every system is a fixed, pre-allocated pool (no per-frame allocation) with a hard cap.
-  // Wind blows right -> left: the same way the clouds drift and the vortex's lower arm turns.
+  // AMBIENCE IS DATA (v10). Visual only; nothing here reads input or writes gameplay state.
+  // A level declares its ambient set in its LEVELS entry (see the schema comment at LEVELS). This engine
+  // owns the effect REGISTRY: every effect is a self-contained module
+  //     registerAmbient(name, { order, defaults, bake(), start(inst), stop(inst), update(inst, dt),
+  //                             draw: { <layer>(inst, arg) }, on: { <event>(inst, ...args) } })
+  // with pre-allocated pools and hard caps, assigned to a draw layer:
+  //     sky     the painted sky band            far     behind the haze (vista, silhouettes)
+  //     mid     colonnade depth (pillars/torches) floor   on the paving, behind everything standing
+  //     behind  play depth, behind every fighter  front   foreground-safe: never over a fighter or the HUD
+  // On level load the engine instantiates exactly the declared modules; on a level change numbers glide to the
+  // new values, effects the new level lacks fade out and are torn down, new ones fade in (crossfade).
+  // There is no level-specific ambient code anywhere: engine and modules only ever read the data.
   // =========================================================================
-  const WIND_DIR = -1;
-  const AMB = {
-    gust: 0, gustT: 5, gustAge: 0, gustOn: false, lastCam: 0,
-    sand: [], puffs: [], grains: [], rings: [],
-    devil: { on: false, fx: 0, age: 0, next: 6 },
-    trickle: { next: 2.0, t: 0, mx: 0, y: 0, acc: 0 },
-    vortex: { key: '', src: null, rot: null, frame: 0 },
-    shim: null, shimCtx: null, clouds: null, banner: null, devilTex: null, puffTex: null,
-    car0: 800, lone0: 760
-  };
-  const BIRDS = [
-    { cx: 330, cy: 160, rx: 46, ry: 13, w: 0.34, ph: 0.0, s: 9 },
-    { cx: 470, cy: 132, rx: 32, ry: 10, w: -0.42, ph: 2.1, s: 7 },
-    { cx: 760, cy: 172, rx: 54, ry: 15, w: 0.29, ph: 4.0, s: 8 },
-    { cx: 1060, cy: 140, rx: 28, ry: 9, w: -0.5, ph: 1.2, s: 6 }
-  ];
-  const CLOUDS = [
-    { x0: 140, v: 9, y: 0.20, w: 300, a: 0.55, k: 0 },
-    { x0: 560, v: 6, y: 0.56, w: 380, a: 0.42, k: 1 },
-    { x0: 980, v: 12, y: 0.36, w: 240, a: 0.50, k: 2 },
-    { x0: 1380, v: 7.5, y: 0.72, w: 420, a: 0.38, k: 1 }
-  ];
-  function windSpeed() { return WIND_DIR * (34 + 80 * AMB.gust); }
+  const AMBIENT_DEFAULTS = { wind: true, footstepDust: true, impactShock: true, idleLife: true };   // what a level gets when it says nothing
+  const AFX = Object.create(null), AFX_LIST = [];
+  const ENV = { dir: -1, ws: 0, gust: 0, dc: 0, lastCam: 0 };       // shared: wind (written by the wind module) and camera delta
+  const IDLE_FX = { k: 0, cape: 0, check: 0 };                       // read by the actor renderer (written by idleLife)
+  const AMBX = { idx: -1, level: null, fade: 2.2, dirty: true, warned: {}, lists: { sky: [], far: [], mid: [], floor: [], behind: [], front: [] }, events: {} };
+  const AMBTEX = {};
+  const SKYC = { img: null, sc: 1, sunX: 0, ay: 0, skyH: 0, VX: 0, VY: 0 };
   function seeded(seed) { let s = seed >>> 0; return () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296; }
-
+  function range(r) { return r[0] + Math.random() * (r[1] - r[0]); }
+  function registerAmbient(name, mod) {
+    mod.name = name; mod.defaults = mod.defaults || {}; mod.draw = mod.draw || {}; mod.on = mod.on || {}; mod.order = mod.order || 0;
+    mod.inst = { mod, name, state: 'off', want: false, k: 0, p: {}, tp: {}, d: null };
+    AFX[name] = mod; AFX_LIST.push(mod.inst);
+  }
+  function rebuildAmbientLists() {
+    AMBX.dirty = false;
+    for (const layer in AMBX.lists) AMBX.lists[layer] = AFX_LIST.filter(i => i.state !== 'off' && i.mod.draw[layer]).sort((a, b) => a.mod.order - b.mod.order);
+    AMBX.events = {};
+    for (const inst of AFX_LIST) if (inst.state !== 'off') for (const ev in inst.mod.on) (AMBX.events[ev] || (AMBX.events[ev] = [])).push(inst);
+  }
+  function ambientLevelIdx() { let i = 0; while (i < LEVELS.length - 1 && camX > lockXOf(i) + 60) i++; return i; }
+  function ambientSetLevel(level, instant, idx) {
+    AMBX.level = level; AMBX.idx = idx == null ? ambientLevelIdx() : idx;
+    const spec = level.ambient || {};
+    AMBX.fade = Math.max(0.05, +spec.fade || 2.2);
+    for (const key in spec) if (key !== 'fade' && !AFX[key] && !AMBX.warned[key]) { AMBX.warned[key] = 1; console.warn('ambient: unknown effect "' + key + '" in level "' + level.name + '"'); }
+    for (const inst of AFX_LIST) {
+      const mod = inst.mod;
+      let s = spec[mod.name]; if (s === undefined) s = AMBIENT_DEFAULTS[mod.name];
+      if (!s) {                                                       // not declared: fade out, then tear down
+        inst.want = false;
+        if (instant && inst.state !== 'off') { inst.k = 0; inst.state = 'off'; if (mod.stop) mod.stop(inst); }
+        continue;
+      }
+      inst.tp = Object.assign({}, mod.defaults, s === true ? null : s);
+      inst.want = true;
+      if (inst.state === 'off') { inst.p = Object.assign({}, inst.tp); inst.state = 'on'; inst.k = instant ? 1 : 0; if (mod.start) mod.start(inst); }
+      else if (instant) { inst.p = Object.assign({}, inst.tp); inst.k = 1; }
+    }
+    rebuildAmbientLists();
+  }
+  function ambientSync(instant) { const i = ambientLevelIdx(); ENV.lastCam = camX; ambientSetLevel(LEVELS[i], instant, i); }
+  function updateAmbient(dt) {
+    const idx = ambientLevelIdx();
+    if (idx !== AMBX.idx) ambientSetLevel(LEVELS[idx], false, idx);   // zone change: swap sets, crossfaded
+    let dc = camX - ENV.lastCam; ENV.lastCam = camX; if (Math.abs(dc) > 200) dc = 0; ENV.dc = dc;
+    const fd = dt / AMBX.fade, lr = Math.min(1, dt * 1.6);
+    for (let n = 0; n < AFX_LIST.length; n++) {
+      const inst = AFX_LIST[n]; if (inst.state === 'off') continue;
+      inst.k = inst.want ? Math.min(1, inst.k + fd) : Math.max(0, inst.k - fd);
+      if (!inst.want && inst.k <= 0) { inst.state = 'off'; if (inst.mod.stop) inst.mod.stop(inst); AMBX.dirty = true; continue; }
+      if (inst.want) {                                                // glide numeric parameters toward the level's values
+        const p = inst.p, tp = inst.tp;
+        for (const key in tp) { const tv = tp[key], pv = p[key]; if (typeof tv === 'number' && typeof pv === 'number') { const d = tv - pv; p[key] = Math.abs(d) < 1e-4 ? tv : pv + d * lr; } else p[key] = tv; }
+      }
+      if (inst.mod.update) inst.mod.update(inst, dt);
+    }
+    if (AMBX.dirty) rebuildAmbientLists();
+  }
+  function ambientDraw(layer, arg) {
+    const L = AMBX.lists[layer];
+    for (let i = 0; i < L.length; i++) { const inst = L[i]; if (inst.k > 0.004) inst.mod.draw[layer](inst, arg); }
+  }
+  function ambientEmit(ev, a, b, c, d, e, f, g) {                      // gameplay -> ambient events (dust on footsteps, impacts); level-agnostic
+    const L = AMBX.events[ev]; if (!L) return;
+    for (let i = 0; i < L.length; i++) if (L[i].k > 0.02) L[i].mod.on[ev](L[i], a, b, c, d, e, f, g);
+  }
   function bakeAmbient() {
-    // drifting cloud wisps: dark smoke bodies, sunlit on the upper-left
-    AMB.clouds = [];
-    for (let k = 0; k < 3; k++) {
-      const w = 360, h = 96, cv = makeCanvas(w, h), c = cv.getContext('2d'), r = seeded(77 + k * 131);
-      for (let i = 0; i < 28; i++) {
-        const t = i / 27, env = Math.sin(Math.PI * t);
-        const x = w * (0.07 + 0.86 * t) + (r() - 0.5) * w * 0.05;
-        const y = h * (0.56 + (r() - 0.5) * 0.22), rad = h * (0.14 + 0.30 * env * (0.6 + 0.4 * r()));
-        let g = c.createRadialGradient(x, y, 0, x, y, rad);
-        g.addColorStop(0, 'rgba(104, 32, 12, 0.30)'); g.addColorStop(1, 'rgba(104, 32, 12, 0)');
-        c.fillStyle = g; c.fillRect(x - rad, y - rad, rad * 2, rad * 2);
-        const hx = x - rad * 0.3, hy = y - rad * 0.38, hr = rad * 0.7;
-        g = c.createRadialGradient(hx, hy, 0, hx, hy, hr);
-        g.addColorStop(0, 'rgba(255, 198, 114, 0.22)'); g.addColorStop(1, 'rgba(255, 198, 114, 0)');
-        c.fillStyle = g; c.fillRect(hx - hr, hy - hr, hr * 2, hr * 2);
-      }
-      AMB.clouds.push(cv);
+    { const cv = makeCanvas(64, 64), c = cv.getContext('2d');       // dust puff, shared
+      const g = c.createRadialGradient(28, 28, 2, 32, 32, 32);
+      g.addColorStop(0, 'rgba(238, 198, 138, 0.95)'); g.addColorStop(0.5, 'rgba(222, 176, 116, 0.5)'); g.addColorStop(1, 'rgba(210, 160, 100, 0)');
+      c.fillStyle = g; c.fillRect(0, 0, 64, 64); AMBTEX.puff = cv; }
+    for (const inst of AFX_LIST) if (inst.mod.bake) inst.mod.bake(inst.mod);
+  }
+  // an effect asks "is this point on a fighter?" before drawing into the foreground
+  function nearFighter(x, y) {
+    if (Math.abs(x - (player.x - camX)) < 46 && y > player.z - player.y - 150 && y < player.z + 10) return true;
+    for (let i = 0; i < enemies.length; i++) {
+      const e = enemies[i], s = e.scale || 1;
+      if (Math.abs(x - (e.x - camX)) < 46 * s && y > e.z - (e.y || 0) - 140 * s && y < e.z + 10) return true;
     }
-    // banner cloth: burnt red with gold trim and a sun disk, lit from the upper-left
-    {
-      const w = 56, h = 200, cv = makeCanvas(w, h), c = cv.getContext('2d');
-      c.beginPath(); c.moveTo(0, 0); c.lineTo(w, 0); c.lineTo(w, h); c.lineTo(w / 2, h - 28); c.lineTo(0, h); c.closePath(); c.clip();
-      let g = c.createLinearGradient(0, 0, w, 0);
-      g.addColorStop(0, '#bb4a1e'); g.addColorStop(0.45, '#8c2e12'); g.addColorStop(1, '#4a1509');
-      c.fillStyle = g; c.fillRect(0, 0, w, h);
-      for (let i = 0; i < 4; i++) {          // soft vertical folds
-        const x = 9 + i * 12.5;
-        g = c.createLinearGradient(x - 6, 0, x + 6, 0);
-        g.addColorStop(0, 'rgba(255, 190, 120, 0.12)'); g.addColorStop(0.5, 'rgba(255, 190, 120, 0)'); g.addColorStop(1, 'rgba(30, 8, 2, 0.22)');
-        c.fillStyle = g; c.fillRect(x - 6, 0, 12, h);
-      }
-      c.fillStyle = '#d9a040'; c.fillRect(3, 0, 3, h); c.fillRect(w - 6, 0, 3, h);
-      c.fillStyle = '#f0c060'; c.fillRect(3, 0, 1, h);
-      c.fillStyle = '#e4ac48'; c.beginPath(); c.arc(w / 2, 66, 11, 0, Math.PI * 2); c.fill();
-      c.strokeStyle = '#e4ac48'; c.lineWidth = 2;
-      for (let a = 0; a < 12; a++) { const an = a * Math.PI / 6; c.beginPath(); c.moveTo(w / 2 + Math.cos(an) * 14, 66 + Math.sin(an) * 14); c.lineTo(w / 2 + Math.cos(an) * 19, 66 + Math.sin(an) * 19); c.stroke(); }
-      c.fillStyle = 'rgba(255, 236, 170, 0.6)'; c.beginPath(); c.arc(w / 2 - 4, 62, 4, 0, Math.PI * 2); c.fill();
-      c.fillStyle = '#d9a040'; c.fillRect(0, 112, w, 3); c.fillRect(0, 120, w, 2);
-      g = c.createLinearGradient(0, 0, 0, h);
-      g.addColorStop(0, 'rgba(255, 200, 120, 0.12)'); g.addColorStop(0.5, 'rgba(0, 0, 0, 0)'); g.addColorStop(1, 'rgba(26, 7, 2, 0.38)');
-      c.fillStyle = g; c.fillRect(0, 0, w, h);
-      c.fillStyle = 'rgba(20, 6, 2, 0.5)'; c.fillRect(0, 0, w, 7);
-      AMB.banner = cv;
+    return false;
+  }
+  // small shared dust-puff pool (footstep dust and impact shocks)
+  function makePuffs(n) { const P = []; for (let i = 0; i < n; i++) P.push({ on: false, x: 0, z: 0, r: 0, vr: 0, vx: 0, life: 0, max: 1, a: 0 }); return P; }
+  function puffSpawn(P, x, z, r, vx, life, a, vr) {
+    for (let i = 0; i < P.length; i++) { const p = P[i]; if (!p.on) { p.on = true; p.x = x; p.z = z; p.r = r; p.vx = vx; p.life = p.max = life; p.a = a; p.vr = vr == null ? r * 1.6 : vr; return; } }
+  }
+  function puffsUpdate(P, dt) {
+    for (let i = 0; i < P.length; i++) {
+      const p = P[i]; if (!p.on) continue;
+      p.life -= dt; if (p.life <= 0) { p.on = false; continue; }
+      p.r += p.vr * dt; p.x += p.vx * dt + ENV.ws * 0.12 * dt; p.vx *= Math.max(0, 1 - 3 * dt); p.vr *= Math.max(0, 1 - 1.6 * dt);
     }
-    // dust devil funnel: sand dabs, light side left
-    {
+  }
+  function puffsDraw(P, K) {
+    const T = AMBTEX.puff;
+    for (let i = 0; i < P.length; i++) {
+      const p = P[i]; if (!p.on) continue;
+      ctx.globalAlpha = p.a * (p.life / p.max) * K;
+      ctx.drawImage(T, p.x - camX - p.r, p.z - p.r * 0.8, p.r * 2, p.r * 1.1);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // ---------------------------------------------------------------- AIR
+  registerAmbient('wind', {                      // field: wind speed + gusts every [a,b] seconds; read by drift, cloth, smoke, cape
+    order: 0, defaults: { dir: -1, strength: 1, gustEvery: [6, 13], gustStrength: 1 },
+    start(inst) { inst.d = inst.d || {}; const d = inst.d; d.gust = 0; d.gustT = 5; d.age = 0; d.on = false; },
+    stop() { ENV.ws = 0; ENV.gust = 0; },
+    update(inst, dt) {
+      const d = inst.d, p = inst.p;
+      if (!d.on) { if (Array.isArray(p.gustEvery) && (d.gustT -= dt) <= 0) { d.on = true; d.age = 0; } }
+      else {
+        d.age += dt; const u = d.age / 3.4;                          // 3.4 s swell
+        d.gust = u >= 1 ? 0 : Math.pow(Math.sin(Math.PI * u), 2);
+        if (u >= 1) { d.on = false; d.gustT = Array.isArray(p.gustEvery) ? range(p.gustEvery) : 1e9; }
+      }
+      ENV.dir = p.dir; ENV.gust = d.gust * p.gustStrength * inst.k;
+      ENV.ws = p.dir * (34 + 80 * d.gust * p.gustStrength) * p.strength * inst.k;
+    }
+  });
+
+  registerAmbient('sandDrift', {                 // wind-blown sand streaks (behind fighters) + a few faint foreground streaks
+    order: 20, defaults: { count: 64, fg: 10, alpha: 1 },
+    start(inst) {
+      const d = inst.d || (inst.d = { P: [] });
+      if (!d.P.length) {
+        for (let i = 0; i < 96; i++) d.P.push({ x: Math.random() * (W + 60) - 30, d: Math.random(), sp: 0.6 + Math.random() * 0.8, len: 3 + Math.random() * 6, a: 0.16 + Math.random() * 0.30, ph: Math.random() * 6.28 });
+        for (let i = 0; i < 16; i++) d.P[i].d = 0.3 + Math.random() * 0.45;
+      }
+    },
+    update(inst, dt) {
+      const P = inst.d.P, fgN = Math.round(inst.p.fg), ws = ENV.ws, dc = ENV.dc;
+      for (let i = 0; i < P.length; i++) {
+        const q = P[i];
+        q.x += ws * q.sp * (0.55 + q.d * 0.9) * dt - dc * (0.5 + q.d * 0.6);
+        if (q.x < -40) { q.x += W + 80; if (i >= fgN) q.d = Math.random(); }
+        else if (q.x > W + 40) q.x -= W + 80;
+      }
+    },
+    draw: {
+      behind(inst) {
+        const P = inst.d.P, p = inst.p, n = Math.min(96, Math.round(p.count * (QUALITY.particleMul || 1))), fgN = Math.round(p.fg);
+        const y0 = LANE_TOP - 46, yh = H - y0 - 4, st = 1 + ENV.gust * 1.6, K = inst.k * p.alpha * (0.75 + 0.5 * ENV.gust);
+        ctx.fillStyle = 'rgb(240, 204, 146)';
+        for (let i = fgN; i < n; i++) {
+          const q = P[i]; ctx.globalAlpha = q.a * K;
+          ctx.fillRect(q.x, y0 + q.d * yh + Math.sin(worldTime * 1.3 + q.ph) * 4, q.len * st, 0.8 + q.d * 0.9);
+        }
+        ctx.globalAlpha = 1;
+      },
+      front(inst) {
+        const P = inst.d.P, p = inst.p, fgN = Math.min(16, Math.round(p.fg));
+        const y0 = LANE_TOP - 46, yh = H - y0 - 4, st = 1 + ENV.gust * 1.6, K = inst.k * p.alpha;
+        ctx.fillStyle = 'rgb(246, 214, 160)';
+        for (let i = 0; i < fgN; i++) {
+          const q = P[i], y = y0 + q.d * yh + Math.sin(worldTime * 1.3 + q.ph) * 4, L = q.len * st * 1.6;
+          if (y < 120 || y > LANE_BOT - 4 || nearFighter(q.x + L / 2, y)) continue;
+          ctx.globalAlpha = Math.min(0.30, q.a) * K; ctx.fillRect(q.x, y, L, 1.3);
+        }
+        ctx.globalAlpha = 1;
+      }
+    }
+  });
+
+  registerAmbient('dustDevils', {                // a rare whirl crossing the far background
+    order: 30, defaults: { every: [45, 85], first: 6, size: 1 },
+    bake() {
       const w = 90, h = 200, cv = makeCanvas(w, h), c = cv.getContext('2d'), r = seeded(4242);
       for (let i = 0; i < 900; i++) {
         const f = r(), half = w * 0.5 * (0.10 + 0.90 * Math.pow(1 - f, 1.5));
-        const u = r() * 2 - 1, x = w / 2 + u * half * 0.92, y = f * h;
-        const rad = 1.5 + 4.5 * (1 - f * 0.7) * r();
+        const u = r() * 2 - 1, x = w / 2 + u * half * 0.92, y = f * h, rad = 1.5 + 4.5 * (1 - f * 0.7) * r();
         c.fillStyle = u < -0.1 ? `rgba(250, 214, 156, ${0.16 + 0.18 * r()})` : `rgba(150, 88, 44, ${0.16 + 0.18 * r()})`;
         c.beginPath(); c.arc(x, y, rad, 0, Math.PI * 2); c.fill();
       }
-      AMB.devilTex = cv;
+      AMBTEX.devil = cv;
+    },
+    start(inst) { const d = inst.d || (inst.d = {}); d.on = false; d.fx = 0; d.age = 0; d.next = Array.isArray(inst.p.every) ? inst.p.first : 1e9; },
+    update(inst, dt) {
+      const d = inst.d, p = inst.p, dir = ENV.dir < 0 ? -1 : 1;
+      if (d.on) {
+        d.age += dt; d.fx += dir * 22 * (1 + ENV.gust * 0.6) * dt;
+        const x = d.fx - camX * FAR_PAR; if (dir < 0 ? x < -140 : x > W + 140) d.on = false;
+      } else if ((d.next -= dt) <= 0) {
+        d.on = true; d.age = 0; d.fx = camX * FAR_PAR + (dir < 0 ? W + 90 : -90);
+        d.next = Array.isArray(p.every) ? range(p.every) : 1e9;
+      }
+    },
+    draw: {
+      far(inst) {
+        const d = inst.d, p = inst.p; if (!d.on) return;
+        const t = worldTime, hy = LANE_TOP - 13, x = d.fx - camX * FAR_PAR, h = H * 0.2 * p.size, w = h * 0.72, T = AMBTEX.devil, N = 12;
+        const fade = Math.min(1, d.age / 2.5) * Math.max(0, Math.min(1, (x + 140) / 220)) * Math.max(0, Math.min(1, (W + 140 - x) / 220)) * inst.k;
+        ctx.globalAlpha = 0.42 * fade; ctx.drawImage(AMBTEX.puff, x - w * 0.9, hy - 9, w * 1.8, 14);
+        ctx.globalAlpha = 0.85 * fade;
+        for (let j = 0; j < N; j++) {
+          const f = j / N;
+          const off = Math.sin(t * 4.4 + f * 7) * 3.2 * (1 - f * 0.5) + ENV.dir * (1 - f) * 9 * (0.6 + ENV.gust);
+          ctx.drawImage(T, 0, f * T.height, T.width, T.height / N + 1, x - w / 2 + off, hy - h + f * h, w, h / N + 0.8);
+        }
+        ctx.globalAlpha = 1;
+      }
     }
-    // dust puff
-    {
-      const cv = makeCanvas(64, 64), c = cv.getContext('2d');
-      const g = c.createRadialGradient(28, 28, 2, 32, 32, 32);
-      g.addColorStop(0, 'rgba(238, 198, 138, 0.95)'); g.addColorStop(0.5, 'rgba(222, 176, 116, 0.5)'); g.addColorStop(1, 'rgba(210, 160, 100, 0)');
-      c.fillStyle = g; c.fillRect(0, 0, 64, 64);
-      AMB.puffTex = cv;
-    }
-    AMB.shim = document.createElement('canvas');
-  }
+  });
 
-  function initAmbient() {
-    const A = AMB;
-    A.sand.length = 0; A.puffs.length = 0; A.grains.length = 0; A.rings.length = 0;
-    for (let i = 0; i < 64; i++) A.sand.push({ x: Math.random() * (W + 60) - 30, d: Math.random(), sp: 0.6 + Math.random() * 0.8, len: 3 + Math.random() * 6, a: 0.16 + Math.random() * 0.30, ph: Math.random() * 6.28, fg: i < 10 });
-    for (const p of A.sand) if (p.fg) p.d = 0.3 + Math.random() * 0.45;
-    for (let i = 0; i < 48; i++) A.puffs.push({ on: false, x: 0, z: 0, r: 0, vr: 0, vx: 0, life: 0, max: 1, a: 0 });
-    for (let i = 0; i < 72; i++) A.grains.push({ on: false, mx: 0, y: 0, vx: 0, vy: 0 });
-    for (let i = 0; i < 6; i++) A.rings.push({ on: false, x: 0, z: 0, t: 0, max: 0.55, s: 1 });
-    A.lastCam = camX;
-  }
-  function spawnPuff(x, z, r, vx, life, a, vr) {
-    const P = AMB.puffs;
-    for (let i = 0; i < P.length; i++) {
-      const p = P[i];
-      if (!p.on) { p.on = true; p.x = x; p.z = z; p.r = r; p.vx = vx; p.life = p.max = life; p.a = a; p.vr = vr == null ? r * 1.6 : vr; return; }
-    }
-  }
-  function spawnShock(x, z, s) {
-    const R = AMB.rings;
-    for (let i = 0; i < R.length; i++) if (!R[i].on) { const q = R[i]; q.on = true; q.x = x; q.z = z; q.t = 0; q.max = 0.55; q.s = s; break; }
-    for (let k = 0; k < 9; k++) {
-      const a = (k / 9) * Math.PI * 2;
-      spawnPuff(x + Math.cos(a) * 12 * s, z + Math.sin(a) * 3 * s, 8 * s, Math.cos(a) * 130 * s, 0.65, 0.6, 18 * s);
-    }
-  }
-  function spawnGrain(mx, y) {
-    const G = AMB.grains;
-    for (let i = 0; i < G.length; i++) { const g = G[i]; if (!g.on) { g.on = true; g.mx = mx; g.y = y; g.vx = (Math.random() - 0.5) * 6; g.vy = 10 + Math.random() * 20; return; } }
-  }
-
-  function updateAmbient(dt) {
-    const A = AMB;
-    // gusts: every 6-13 s a 3.4 s swell
-    if (!A.gustOn) { A.gustT -= dt; if (A.gustT <= 0) { A.gustOn = true; A.gustAge = 0; } }
-    else {
-      A.gustAge += dt; const u = A.gustAge / 3.4;
-      A.gust = u >= 1 ? 0 : Math.pow(Math.sin(Math.PI * u), 2);
-      if (u >= 1) { A.gustOn = false; A.gustT = 6 + Math.random() * 7; }
-    }
-    const ws = windSpeed();
-    let dc = camX - A.lastCam; A.lastCam = camX;
-    if (Math.abs(dc) > 200) dc = 0;
-    for (let i = 0; i < A.sand.length; i++) {
-      const p = A.sand[i];
-      p.x += ws * p.sp * (0.55 + p.d * 0.9) * dt - dc * (0.5 + p.d * 0.6);
-      if (p.x < -40) { p.x += W + 80; if (!p.fg) p.d = Math.random(); }
-      else if (p.x > W + 40) p.x -= W + 80;
-    }
-    for (let i = 0; i < A.puffs.length; i++) {
-      const p = A.puffs[i]; if (!p.on) continue;
-      p.life -= dt; if (p.life <= 0) { p.on = false; continue; }
-      p.r += p.vr * dt; p.x += p.vx * dt + ws * 0.12 * dt; p.vx *= Math.max(0, 1 - 3 * dt); p.vr *= Math.max(0, 1 - 1.6 * dt);
-    }
-    for (let i = 0; i < A.rings.length; i++) { const q = A.rings[i]; if (q.on && (q.t += dt) >= q.max) q.on = false; }
-    for (let i = 0; i < A.grains.length; i++) {
-      const g = A.grains[i]; if (!g.on) continue;
-      g.vy += 300 * dt; g.mx += (g.vx + ws * 0.2) * dt; g.y += g.vy * dt;
-      if (g.y > LANE_TOP - 12) g.on = false;
-    }
-    // sand trickling off a capital now and then
-    const T = A.trickle;
-    if (T.t > 0) {
-      T.t -= dt; T.acc += dt * 36;
-      while (T.acc >= 1) { T.acc -= 1; spawnGrain(T.mx + (Math.random() - 0.5) * 3, T.y); }
-    } else if ((T.next -= dt) <= 0) {
-      T.next = 2.5 + Math.random() * 3.5;
-      if (PILL.n) {
-        const i = Math.floor(Math.random() * PILL.n), cx = PILL.x[i], pw = PILL.w[i];
-        if (cx > 60 && cx < W - 60) {
-          T.mx = cx + (Math.random() < 0.5 ? -1 : 1) * pw * 0.40 + camX * 0.65;
-          T.y = LANE_TOP + 12 - 262 + 12; T.t = 1.4 + Math.random() * 1.4; T.acc = 0;
+  registerAmbient('heatShimmer', {               // heat haze: strips of a cached band wobble above the horizon and above flames
+    order: 90, defaults: { horizon: true, braziers: true, strength: 1 },
+    start(inst) { const d = inst.d || (inst.d = { S: document.createElement('canvas'), c: null }); },
+    draw: {
+      mid(inst) {
+        const d = inst.d, p = inst.p, amp = p.strength * inst.k;
+        if (QUALITY.fxMul < 1 || shakeMag > 0.4 || amp < 0.03) return;
+        const fx = canvas.width / W, fy = canvas.height / H;
+        const y1 = LANE_TOP - 8, hy0 = y1 - 44, HB = 44, BB = 84, BW = 56;
+        const S = d.S, cw = Math.ceil(W * fx), ch = Math.ceil((HB + BB) * fy);
+        if (S.width !== cw || S.height !== ch) { S.width = cw; S.height = ch; d.c = null; }
+        const c = d.c || (d.c = S.getContext('2d')), t = worldTime;
+        c.globalCompositeOperation = 'copy';
+        c.drawImage(canvas, 0, Math.round(hy0 * fy), cw, Math.round(HB * fy), 0, 0, cw, Math.round(HB * fy));   // one snapshot of the band
+        if (p.horizon) {
+          for (let y = hy0; y < y1; y += 4) {
+            const k = (y - hy0) / HB;
+            ctx.drawImage(S, 0, (y - hy0) * fy, cw, 4 * fy, Math.sin(t * 3.0 + y * 0.55) * (0.3 + 0.7 * k) * 0.9 * amp, y, W, 4);
+          }
+        }
+        if (!p.braziers) return;
+        const by = LANE_TOP - 46, top = by - 122, bot = by - 40;
+        let slot = 0;
+        for (let i = 0; i < BRAZ.n; i++) {                              // rising heat above each flame (one small patch per flame)
+          const bx = BRAZ.x[i]; if (bx < -40 || bx > W + 40 || (slot + 1) * 60 > W) continue;
+          const sx = slot * 60 * fx, sy = Math.round(HB * fy); slot++;
+          c.globalCompositeOperation = 'source-over';
+          c.drawImage(canvas, Math.round((bx - BW / 2) * fx), Math.round(top * fy), Math.round(BW * fx), Math.round(BB * fy), sx, sy, Math.round(BW * fx), Math.round(BB * fy));
+          for (let y = top; y < bot; y += 6) {
+            const k = (y - top) / (bot - top), wv = 14 + 14 * k;
+            const dx = Math.sin(t * 7.5 - y * 0.32 + i * 1.9) * 1.7 * (0.35 + 0.65 * k) * amp;
+            ctx.drawImage(S, sx + (BW / 2 - wv) * fx, sy + (y - top) * fy, 2 * wv * fx, 6 * fy, bx - wv + dx, y, 2 * wv, 6);
+          }
         }
       }
     }
-    // rare dust devil crossing the far background
-    const D = A.devil;
-    if (D.on) { D.age += dt; D.fx += WIND_DIR * 22 * (1 + A.gust * 0.6) * dt; if (D.fx - camX * FAR_PAR < -140) D.on = false; }
-    else if ((D.next -= dt) <= 0) { D.on = true; D.age = 0; D.fx = camX * FAR_PAR + W + 90; D.next = 45 + Math.random() * 40; }
-  }
+  });
 
-  // --- sky ---
-  function drawVortexSpin(skyImg, sc, sunX, ay, skyH, VX, VY) {
-    const V = AMB.vortex, fx = canvas.width / W;
-    const R = Math.round(Math.min(skyH * 0.7, W * 0.3));
-    const D = Math.round(2 * R * fx);                    // device-res disk: blitted unscaled every frame
-    const key = R + ':' + D + ':' + sc.toFixed(4);
-    if (V.key !== key) {
-      V.key = key; V.src = makeCanvas(D, D); V.rot = makeCanvas(D, D);
-      const c = V.src.getContext('2d'), iw = skyImg.naturalWidth, ih = skyImg.naturalHeight, rs = R / sc;
-      c.drawImage(skyImg, VX * iw - rs, VY * ih - rs, 2 * rs, 2 * rs, 0, 0, D, D);
-      c.globalCompositeOperation = 'destination-in';
-      const g = c.createRadialGradient(D / 2, D / 2, D * 0.16, D / 2, D / 2, D * 0.5);
-      g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
-      c.fillStyle = g; c.fillRect(0, 0, D, D);
-      V.frame = 0; PERF_SKIP = true;
-    }
-    // re-rotated at 15 Hz into a feathered disk (0.002 rad per step: the steps are sub-pixel)
-    if ((V.frame++ % 4) === 0) {
-      const c = V.rot.getContext('2d');
-      c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, D, D);
-      c.translate(D / 2, D / 2); c.rotate(worldTime * 0.032); c.drawImage(V.src, -D / 2, -D / 2);
-    }
-    ctx.drawImage(V.rot, Math.round((sunX - R) * fx) / fx, Math.round((ay - R) * fx) / fx, D / fx, D / fx);
-  }
-  function drawClouds(skyH) {
-    const C = AMB.clouds; if (!C) return;
-    const span = W + 700, fx = canvas.width / W, fy = canvas.height / H;
-    if (!AMB.cloudInst || AMB.cloudKey !== fx + ':' + fy) {          // v9 perf: one device-res bake per instance
-      AMB.cloudKey = fx + ':' + fy; AMB.cloudInst = [];
-      for (let k = 0; k < CLOUDS.length; k++) {
-        const c = CLOUDS[k], T = C[c.k], h = c.w * T.height / T.width;
-        const cv = makeCanvas(Math.round(c.w * fx), Math.round(h * fy)), g = cv.getContext('2d');
-        g.globalAlpha = c.a; g.drawImage(T, 0, 0, cv.width, cv.height);
-        AMB.cloudInst.push(cv);
+  // ---------------------------------------------------------------- SKY
+  registerAmbient('vortexSpin', {                // the fire vortex turns slowly: a feathered disk re-rotated at 15 Hz
+    order: 10, defaults: { speed: 0.032 },
+    start(inst) { const d = inst.d || (inst.d = { key: '', src: null, rot: null, frame: 0, ang: 0 }); d.ang = worldTime * inst.p.speed; },
+    update(inst, dt) { inst.d.ang += inst.p.speed * dt; },
+    draw: {
+      sky(inst, S) {
+        const V = inst.d, fx = canvas.width / W;
+        const R = Math.round(Math.min(S.skyH * 0.7, W * 0.3)), D = Math.round(2 * R * fx), key = R + ':' + D + ':' + S.sc.toFixed(4);
+        if (V.key !== key) {
+          V.key = key; V.src = makeCanvas(D, D); V.rot = makeCanvas(D, D);
+          const c = V.src.getContext('2d'), iw = S.img.naturalWidth, ih = S.img.naturalHeight, rs = R / S.sc;
+          c.drawImage(S.img, S.VX * iw - rs, S.VY * ih - rs, 2 * rs, 2 * rs, 0, 0, D, D);
+          c.globalCompositeOperation = 'destination-in';
+          const g = c.createRadialGradient(D / 2, D / 2, D * 0.16, D / 2, D / 2, D * 0.5);
+          g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+          c.fillStyle = g; c.fillRect(0, 0, D, D);
+          V.frame = 0; PERF_SKIP = true;
+        }
+        if ((V.frame++ % 4) === 0) {                                    // 15 Hz: 0.002 rad per step, sub-pixel
+          const c = V.rot.getContext('2d');
+          c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, D, D);
+          c.translate(D / 2, D / 2); c.rotate(V.ang); c.drawImage(V.src, -D / 2, -D / 2);
+        }
+        ctx.globalAlpha = inst.k;
+        ctx.drawImage(V.rot, Math.round((S.sunX - R) * fx) / fx, Math.round((S.ay - R) * fx) / fx, D / fx, D / fx);
+        ctx.globalAlpha = 1;
       }
     }
-    for (let k = 0; k < CLOUDS.length; k++) {
-      const c = CLOUDS[k], I = AMB.cloudInst[k], h = I.height / fy;
-      const x = ((c.x0 + WIND_DIR * worldTime * c.v - camX * 0.1) % span + span) % span - 350;
-      if (x > W || x + c.w < 0) continue;
-      ctx.drawImage(I, Math.round(x * fx) / fx, Math.round((skyH * c.y - h / 2) * fy) / fy, I.width / fx, h);
+  });
+
+  const CLOUD_TABLE = [
+    { x0: 140, v: 9, y: 0.20, w: 300, a: 0.55, k: 0 }, { x0: 560, v: 6, y: 0.56, w: 380, a: 0.42, k: 1 },
+    { x0: 980, v: 12, y: 0.36, w: 240, a: 0.50, k: 2 }, { x0: 1380, v: 7.5, y: 0.72, w: 420, a: 0.38, k: 1 }
+  ];
+  for (let i = 4; i < 8; i++) CLOUD_TABLE.push({ x0: 120 + i * 331 % 1500, v: 5 + (i * 3.7) % 8, y: 0.16 + (i * 0.29) % 0.62, w: 240 + (i * 61) % 190, a: 0.36 + (i % 3) * 0.05, k: i % 3 });
+  registerAmbient('clouds', {                    // smoke-bodied clouds drifting with the wind, sunlit upper-left
+    order: 20, defaults: { count: 4, speed: 1, alpha: 1 },
+    bake(mod) {
+      mod.tex = [];
+      for (let k = 0; k < 3; k++) {
+        const w = 360, h = 96, cv = makeCanvas(w, h), c = cv.getContext('2d'), r = seeded(77 + k * 131);
+        for (let i = 0; i < 28; i++) {
+          const t = i / 27, env = Math.sin(Math.PI * t);
+          const x = w * (0.07 + 0.86 * t) + (r() - 0.5) * w * 0.05, y = h * (0.56 + (r() - 0.5) * 0.22), rad = h * (0.14 + 0.30 * env * (0.6 + 0.4 * r()));
+          let g = c.createRadialGradient(x, y, 0, x, y, rad);
+          g.addColorStop(0, 'rgba(104, 32, 12, 0.30)'); g.addColorStop(1, 'rgba(104, 32, 12, 0)');
+          c.fillStyle = g; c.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+          const hx = x - rad * 0.3, hy = y - rad * 0.38, hr = rad * 0.7;
+          g = c.createRadialGradient(hx, hy, 0, hx, hy, hr);
+          g.addColorStop(0, 'rgba(255, 198, 114, 0.22)'); g.addColorStop(1, 'rgba(255, 198, 114, 0)');
+          c.fillStyle = g; c.fillRect(hx - hr, hy - hr, hr * 2, hr * 2);
+        }
+        mod.tex.push(cv);
+      }
+    },
+    start(inst) { const d = inst.d || (inst.d = { key: '', I: [], off: new Float32Array(8) }); d.key = ''; for (let i = 0; i < 8; i++) d.off[i] = ENV.dir * worldTime * CLOUD_TABLE[i].v * inst.p.speed; },
+    update(inst, dt) { const d = inst.d; for (let i = 0; i < 8; i++) d.off[i] += ENV.dir * CLOUD_TABLE[i].v * inst.p.speed * dt; },
+    draw: {
+      sky(inst, S) {
+        const d = inst.d, p = inst.p, T = AFX.clouds.tex, span = W + 700, fx = canvas.width / W, fy = canvas.height / H, key = fx + ':' + fy;
+        if (d.key !== key) {                                            // one device-res bake per instance (alpha baked in)
+          d.key = key; d.I.length = 0;
+          for (let k = 0; k < 8; k++) {
+            const c = CLOUD_TABLE[k], t = T[c.k], h = c.w * t.height / t.width;
+            const cv = makeCanvas(Math.round(c.w * fx), Math.round(h * fy)), g = cv.getContext('2d');
+            g.globalAlpha = c.a; g.drawImage(t, 0, 0, cv.width, cv.height); d.I.push(cv);
+          }
+          PERF_SKIP = true;
+        }
+        const n = Math.min(8, Math.ceil(p.count - 0.001));
+        for (let k = 0; k < n; k++) {
+          const c = CLOUD_TABLE[k], I = d.I[k], h = I.height / fy;
+          const x = ((c.x0 + d.off[k] - camX * 0.1) % span + span) % span - 350;
+          if (x > W || x + c.w < 0) continue;
+          ctx.globalAlpha = p.alpha * inst.k * Math.min(1, p.count - k);
+          ctx.drawImage(I, Math.round(x * fx) / fx, Math.round((S.skyH * c.y - h / 2) * fy) / fy, I.width / fx, h);
+        }
+        ctx.globalAlpha = 1;
+      }
     }
-  }
+  });
 
+  const BIRD_TABLE = [
+    { cx: 330, cy: 160, rx: 46, ry: 13, w: 0.34, ph: 0.0, s: 9 }, { cx: 470, cy: 132, rx: 32, ry: 10, w: -0.42, ph: 2.1, s: 7 },
+    { cx: 760, cy: 172, rx: 54, ry: 15, w: 0.29, ph: 4.0, s: 8 }, { cx: 1060, cy: 140, rx: 28, ry: 9, w: -0.5, ph: 1.2, s: 6 }
+  ];
+  { const r = seeded(913); for (let i = 4; i < 10; i++) BIRD_TABLE.push({ cx: 160 + r() * 1100, cy: 120 + r() * 70, rx: 26 + r() * 30, ry: 8 + r() * 8, w: (r() < 0.5 ? -1 : 1) * (0.28 + r() * 0.25), ph: r() * 6.28, s: 6 + r() * 3 }); }
+  const BIRD_KINDS = {
+    vulture: { col: 'rgb(70, 28, 12)', alpha: 0.78, size: 1, wm: 1, rm: 1, steady: false, flap: 0 },       // wide slow circles, long glides
+    crow: { col: 'rgb(48, 22, 12)', alpha: 0.82, size: 0.62, wm: 1.9, rm: 1.4, steady: true, flap: 9 }      // small, quick, constant wingbeat
+  };
+  registerAmbient('birds', {                     // circling silhouettes in the far sky
+    order: 10, defaults: { count: 4, kind: 'vulture' },
+    draw: {
+      far(inst) {
+        const p = inst.p, K = BIRD_KINDS[p.kind] || BIRD_KINDS.vulture, t = worldTime, span = W + 240, n = Math.min(BIRD_TABLE.length, Math.ceil(p.count - 0.001));
+        ctx.strokeStyle = K.col; ctx.lineCap = 'round';
+        for (let k = 0; k < n; k++) {
+          const B = BIRD_TABLE[k];
+          ctx.globalAlpha = K.alpha * inst.k * Math.min(1, p.count - k);
+          const cx = ((B.cx - camX * 0.15) % span + span) % span - 120, a = t * B.w * K.wm + B.ph, s = B.s * K.size;
+          const x = cx + Math.cos(a) * B.rx * K.rm, y = LANE_TOP - B.cy + Math.sin(a) * B.ry;
+          const fl = K.steady ? Math.sin(t * K.flap + B.ph * 2) * 0.8 : (Math.sin(t * 0.45 + B.ph * 3) > 0.62 ? Math.sin(t * 8.5 + B.ph) : 0.22 + Math.sin(t * 1.3 + B.ph) * 0.08);
+          ctx.lineWidth = Math.max(1.1, s * 0.22);
+          ctx.beginPath();
+          ctx.moveTo(x - s, y + s * 0.1 - fl * s * 0.45);
+          ctx.quadraticCurveTo(x - s * 0.45, y - s * 0.3, x, y);
+          ctx.quadraticCurveTo(x + s * 0.45, y - s * 0.3, x + s, y + s * 0.1 - fl * s * 0.45);
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+      }
+    }
+  });
 
-  // --- far layer: vultures, caravan, lone figure, dust devil (all drawn before the haze) ---
   function drawCamel(x, y, s, ph, rider) {
     ctx.save(); ctx.translate(x, y); ctx.scale(-1, 1);           // walking left
     ctx.lineWidth = s * 0.13;
@@ -2282,190 +2506,487 @@
     ctx.lineWidth = s * 0.08;
     ctx.beginPath(); ctx.moveTo(x + dir * 0.35 * s, y); ctx.lineTo(x + dir * 0.28 * s, y - 2.0 * s); ctx.stroke();   // staff
   }
-  function drawFarLife() {
-    const t = worldTime, A = AMB;
-    // vultures circling (hazy dark, small)
-    ctx.strokeStyle = 'rgba(70, 28, 12, 0.78)'; ctx.lineCap = 'round';
-    const span = W + 240;
-    for (let k = 0; k < BIRDS.length; k++) {
-      const B = BIRDS[k];
-      const cx = ((B.cx - camX * 0.15) % span + span) % span - 120;
-      const a = t * B.w + B.ph, s = B.s;
-      const x = cx + Math.cos(a) * B.rx, y = LANE_TOP - B.cy + Math.sin(a) * B.ry;
-      const fl = Math.sin(t * 0.45 + B.ph * 3) > 0.62 ? Math.sin(t * 8.5 + B.ph) : 0.22 + Math.sin(t * 1.3 + B.ph) * 0.08;
-      ctx.lineWidth = Math.max(1.1, s * 0.22);
-      ctx.beginPath();
-      ctx.moveTo(x - s, y + s * 0.1 - fl * s * 0.45);
-      ctx.quadraticCurveTo(x - s * 0.45, y - s * 0.3, x, y);
-      ctx.quadraticCurveTo(x + s * 0.45, y - s * 0.3, x + s, y + s * 0.1 - fl * s * 0.45);
-      ctx.stroke();
-    }
-    const hy = LANE_TOP - 13, s = Math.max(7, H * 0.019);
-    ctx.fillStyle = 'rgba(84, 38, 18, 0.88)'; ctx.strokeStyle = 'rgba(84, 38, 18, 0.88)';
-    // caravan crossing slowly right -> left
-    const cyc = W + 1100;
-    const cx = ((A.car0 - t * 6 - camX * FAR_PAR) % cyc + cyc) % cyc - 300;
-    if (cx > -8 * s && cx < W + 4 * s) {
-      const ph = t * 2.6;
-      drawCamel(cx, hy, s, ph, true);
-      drawCamel(cx + 2.5 * s, hy, s * 0.95, ph + 1.3, false);
-      drawCamel(cx + 5.0 * s, hy, s * 0.9, ph + 2.4, true);
-      drawWalker(cx + 7.1 * s, hy, s * 0.95, ph * 1.4, -1);
-    }
-    // lone figure walking the other way
-    const lyc = W + 1500;
-    const lx = ((A.lone0 + t * 4.5 - camX * FAR_PAR) % lyc + lyc) % lyc - 600;
-    if (lx > -20 && lx < W + 20) drawWalker(lx, hy, s * 0.9, t * 3.4, 1);
-    // dust devil
-    const D = A.devil;
-    if (D.on && A.devilTex) {
-      const x = D.fx - camX * FAR_PAR, h = H * 0.2, w = h * 0.72, T = A.devilTex, N = 12;
-      const fade = Math.min(1, D.age / 2.5) * Math.max(0, Math.min(1, (x + 140) / 220));
-      ctx.globalAlpha = 0.42 * fade;
-      ctx.drawImage(A.puffTex, x - w * 0.9, hy - 9, w * 1.8, 14);
-      ctx.globalAlpha = 0.85 * fade;
-      for (let j = 0; j < N; j++) {
-        const f = j / N;
-        const off = Math.sin(t * 4.4 + f * 7) * 3.2 * (1 - f * 0.5) + WIND_DIR * (1 - f) * 9 * (0.6 + A.gust);
-        ctx.drawImage(T, 0, f * T.height, T.width, T.height / N + 1, x - w / 2 + off, hy - h + f * h, w, h / N + 0.8);
-      }
-      ctx.globalAlpha = 1;
-    }
-  }
-
-  // --- midground: banners, trickling sand, heat shimmer, brazier light pools ---
-  function drawBanner(cx, top, w, h, seed) {
-    const T = AMB.banner; if (!T) return;
-    const N = 9, t = worldTime, g = AMB.gust;
-    for (let j = 0; j < N; j++) {
-      const f0 = j / N, f = (j + 0.5) / N;
-      const sway = Math.pow(f, 1.3) * (Math.sin(t * 2.2 + f * 3.4 + seed * 1.7) * (2.2 + 2.8 * g)
-                 + Math.sin(t * 5.1 + f * 6 + seed) * 0.8 * (0.4 + g) + WIND_DIR * (2 + 6 * g));
-      ctx.drawImage(T, 0, f0 * T.height, T.width, T.height / N + 1, cx - w / 2 + sway, top + f0 * h, w, h / N + 0.7);
-    }
-    ctx.fillStyle = '#5e3212'; ctx.fillRect(cx - w * 0.62, top - 2.5, w * 1.24, 3.5);
-    ctx.fillStyle = '#e6ae4c'; ctx.fillRect(cx - w * 0.62, top - 2.5, w * 1.24, 1);
-  }
-  function drawGrains() {
-    ctx.fillStyle = 'rgb(234, 190, 124)';
-    ctx.globalAlpha = 0.85;
-    const G = AMB.grains;
-    for (let i = 0; i < G.length; i++) { const g = G[i]; if (g.on) ctx.fillRect(g.mx - camX * 0.65, g.y, 1.3, 2.2); }
-    ctx.globalAlpha = 1;
-  }
-  function drawHeatShimmer() {
-    if (QUALITY.fxMul < 1 || shakeMag > 0.4 || !AMB.shim) return;
-    const fx = canvas.width / W, fy = canvas.height / H;
-    const y1 = LANE_TOP - 8, hy0 = y1 - 44, HB = 44, BB = 84, BW = 56;
-    // v9 perf: snapshot only the rows/patches that actually wobble (horizon strip + one small patch per flame)
-    const S = AMB.shim, cw = Math.ceil(W * fx), ch = Math.ceil((HB + BB) * fy);
-    if (S.width !== cw || S.height !== ch) { S.width = cw; S.height = ch; AMB.shimCtx = null; }
-    const c = AMB.shimCtx || (AMB.shimCtx = S.getContext('2d'));
-    c.globalCompositeOperation = 'copy';
-    c.drawImage(canvas, 0, Math.round(hy0 * fy), cw, Math.round(HB * fy), 0, 0, cw, Math.round(HB * fy));
-    const t = worldTime;
-    for (let y = hy0; y < y1; y += 4) {                                    // above the horizon line
-      const k = (y - hy0) / HB;
-      ctx.drawImage(S, 0, (y - hy0) * fy, cw, 4 * fy, Math.sin(t * 3.0 + y * 0.55) * (0.3 + 0.7 * k) * 0.9, y, W, 4);
-    }
-    const by = LANE_TOP - 46, top = by - 122, bot = by - 40;
-    let slot = 0;
-    for (let i = 0; i < BRAZ.n; i++) {                                     // rising heat above each flame
-      const bx = BRAZ.x[i]; if (bx < -40 || bx > W + 40 || (slot + 1) * 60 > W) continue;
-      const sx = slot * 60 * fx, sy = Math.round(HB * fy); slot++;
-      c.globalCompositeOperation = 'source-over';                         // 'copy' would wipe the horizon strip
-      c.drawImage(canvas, Math.round((bx - BW / 2) * fx), Math.round(top * fy), Math.round(BW * fx), Math.round(BB * fy), sx, sy, Math.round(BW * fx), Math.round(BB * fy));
-      for (let y = top; y < bot; y += 6) {
-        const k = (y - top) / (bot - top), wv = 14 + 14 * k;
-        const dx = Math.sin(t * 7.5 - y * 0.32 + i * 1.9) * 1.7 * (0.35 + 0.65 * k);
-        ctx.drawImage(S, sx + (BW / 2 - wv) * fx, sy + (y - top) * fy, 2 * wv * fx, 6 * fy, bx - wv + dx, y, 2 * wv, 6);
+  registerAmbient('caravans', {                  // a camel caravan and a lone walker crossing the horizon, never interacting
+    order: 20, defaults: { speed: 1, lone: true, start: 800, loneStart: 760 },
+    start(inst) { const d = inst.d || (inst.d = {}); d.s = worldTime * 6 * inst.p.speed; d.s2 = worldTime * 4.5 * inst.p.speed; },
+    update(inst, dt) { const d = inst.d, sp = inst.p.speed; d.s += 6 * sp * dt; d.s2 += 4.5 * sp * dt; },
+    draw: {
+      far(inst) {
+        const d = inst.d, p = inst.p, t = worldTime, hy = LANE_TOP - 13, s = Math.max(7, H * 0.019);
+        ctx.lineCap = 'round'; ctx.fillStyle = ctx.strokeStyle = 'rgb(84, 38, 18)'; ctx.globalAlpha = 0.88 * inst.k;
+        const cyc = W + 1100, cx = ((p.start - d.s - camX * FAR_PAR) % cyc + cyc) % cyc - 300;
+        if (cx > -8 * s && cx < W + 4 * s) {
+          const ph = t * 2.6 * p.speed;
+          drawCamel(cx, hy, s, ph, true);
+          drawCamel(cx + 2.5 * s, hy, s * 0.95, ph + 1.3, false);
+          drawCamel(cx + 5.0 * s, hy, s * 0.9, ph + 2.4, true);
+          drawWalker(cx + 7.1 * s, hy, s * 0.95, ph * 1.4, -1);
+        }
+        if (p.lone) {
+          const lyc = W + 1500, lx = ((p.loneStart + d.s2 - camX * FAR_PAR) % lyc + lyc) % lyc - 600;
+          if (lx > -20 && lx < W + 20) drawWalker(lx, hy, s * 0.9, t * 3.4 * p.speed, 1);
+        }
+        ctx.globalAlpha = 1;
       }
     }
-  }
-  function drawBrazierPools() {
-    if (!BAKED.glow) return;
-    // v9 perf: the pool is pre-scaled once to device pixels and blitted unscaled; breathing lives in the alpha
-    const fx = canvas.width / W, fy = canvas.height / H, r = 112, pw = Math.round(2 * r * fx), ph = Math.round(0.42 * r * fy);
-    let T = AMB.poolTex;
-    if (!T || T.width !== pw || T.height !== ph) {
-      T = AMB.poolTex = makeCanvas(pw, ph);
-      T.getContext('2d').drawImage(BAKED.glow, 0, 0, pw, ph);
+  });
+
+  // ---------------------------------------------------------------- SET
+  registerAmbient('banners', {                   // cloth strips on the midground pillars, strip-deformed by the wind
+    order: 10, defaults: { every: 2, phase: 1, sway: 1 },
+    bake(mod) {
+      const w = 56, h = 200, cv = makeCanvas(w, h), c = cv.getContext('2d');
+      c.beginPath(); c.moveTo(0, 0); c.lineTo(w, 0); c.lineTo(w, h); c.lineTo(w / 2, h - 28); c.lineTo(0, h); c.closePath(); c.clip();
+      let g = c.createLinearGradient(0, 0, w, 0);
+      g.addColorStop(0, '#bb4a1e'); g.addColorStop(0.45, '#8c2e12'); g.addColorStop(1, '#4a1509');
+      c.fillStyle = g; c.fillRect(0, 0, w, h);
+      for (let i = 0; i < 4; i++) {
+        const x = 9 + i * 12.5;
+        g = c.createLinearGradient(x - 6, 0, x + 6, 0);
+        g.addColorStop(0, 'rgba(255, 190, 120, 0.12)'); g.addColorStop(0.5, 'rgba(255, 190, 120, 0)'); g.addColorStop(1, 'rgba(30, 8, 2, 0.22)');
+        c.fillStyle = g; c.fillRect(x - 6, 0, 12, h);
+      }
+      c.fillStyle = '#d9a040'; c.fillRect(3, 0, 3, h); c.fillRect(w - 6, 0, 3, h);
+      c.fillStyle = '#f0c060'; c.fillRect(3, 0, 1, h);
+      c.fillStyle = '#e4ac48'; c.beginPath(); c.arc(w / 2, 66, 11, 0, Math.PI * 2); c.fill();
+      c.strokeStyle = '#e4ac48'; c.lineWidth = 2;
+      for (let a = 0; a < 12; a++) { const an = a * Math.PI / 6; c.beginPath(); c.moveTo(w / 2 + Math.cos(an) * 14, 66 + Math.sin(an) * 14); c.lineTo(w / 2 + Math.cos(an) * 19, 66 + Math.sin(an) * 19); c.stroke(); }
+      c.fillStyle = 'rgba(255, 236, 170, 0.6)'; c.beginPath(); c.arc(w / 2 - 4, 62, 4, 0, Math.PI * 2); c.fill();
+      c.fillStyle = '#d9a040'; c.fillRect(0, 112, w, 3); c.fillRect(0, 120, w, 2);
+      g = c.createLinearGradient(0, 0, 0, h);
+      g.addColorStop(0, 'rgba(255, 200, 120, 0.12)'); g.addColorStop(0.5, 'rgba(0, 0, 0, 0)'); g.addColorStop(1, 'rgba(26, 7, 2, 0.38)');
+      c.fillStyle = g; c.fillRect(0, 0, w, h);
+      c.fillStyle = 'rgba(20, 6, 2, 0.5)'; c.fillRect(0, 0, w, 7);
+      mod.tex = cv;
+    },
+    draw: {
+      mid(inst) {
+        const p = inst.p, T = AFX.banners.tex, N = 9, t = worldTime, g = ENV.gust, ev = Math.max(1, Math.round(p.every)), ph = 262;
+        ctx.globalAlpha = inst.k;
+        for (let n = 0; n < PILL.n; n++) {
+          if (((PILL.i[n] % ev) + ev) % ev !== p.phase) continue;
+          const cx = PILL.x[n], w = PILL.w[n] * 0.44, top = LANE_TOP + 12 - ph + ph * 0.17, h = ph * 0.36, seed = PILL.i[n];
+          for (let j = 0; j < N; j++) {
+            const f0 = j / N, f = (j + 0.5) / N;
+            const sway = p.sway * Math.pow(f, 1.3) * (Math.sin(t * 2.2 + f * 3.4 + seed * 1.7) * (2.2 + 2.8 * g)
+                       + Math.sin(t * 5.1 + f * 6 + seed) * 0.8 * (0.4 + g) + ENV.dir * (2 + 6 * g));
+            ctx.drawImage(T, 0, f0 * T.height, T.width, T.height / N + 1, cx - w / 2 + sway, top + f0 * h, w, h / N + 0.7);
+          }
+          ctx.fillStyle = '#5e3212'; ctx.fillRect(cx - w * 0.62, top - 2.5, w * 1.24, 3.5);
+          ctx.fillStyle = '#e6ae4c'; ctx.fillRect(cx - w * 0.62, top - 2.5, w * 1.24, 1);
+        }
+        ctx.globalAlpha = 1;
+      }
     }
-    ctx.globalCompositeOperation = 'lighter';
-    for (let i = 0; i < BRAZ.n; i++) {
-      const bx = BRAZ.x[i], fl = BRAZ.f[i];
-      if (bx < -r || bx > W + r) continue;
-      const br = 0.5 + 0.5 * Math.sin(worldTime * 1.7 + i * 2.1);       // slow breathing
-      ctx.globalAlpha = Math.max(0, 0.26 + 0.22 * br + fl * 0.016);
-      ctx.drawImage(T, Math.round((bx - r + fl * 0.6) * fx) / fx, Math.round((LANE_TOP - 10 - r * 0.15) * fy) / fy, pw / fx, ph / fy);
+  });
+
+  registerAmbient('pillarSandTrickle', {         // sand pouring off a pillar capital now and then
+    order: 20, defaults: { every: [2.5, 6], rate: 36, duration: [1.4, 2.8] },
+    start(inst) {
+      const d = inst.d || (inst.d = { G: [], next: 2, t: 0, mx: 0, y: 0, acc: 0 });
+      if (!d.G.length) for (let i = 0; i < 72; i++) d.G.push({ on: false, mx: 0, y: 0, vx: 0, vy: 0 });
+      d.next = 2; d.t = 0;
+    },
+    update(inst, dt) {
+      const d = inst.d, p = inst.p, G = d.G;
+      for (let i = 0; i < G.length; i++) {
+        const g = G[i]; if (!g.on) continue;
+        g.vy += 300 * dt; g.mx += (g.vx + ENV.ws * 0.2) * dt; g.y += g.vy * dt;
+        if (g.y > LANE_TOP - 12) g.on = false;
+      }
+      if (d.t > 0) {
+        d.t -= dt; d.acc += dt * p.rate;
+        while (d.acc >= 1) {
+          d.acc -= 1;
+          for (let i = 0; i < G.length; i++) { const g = G[i]; if (!g.on) { g.on = true; g.mx = d.mx + (Math.random() - 0.5) * 3; g.y = d.y; g.vx = (Math.random() - 0.5) * 6; g.vy = 10 + Math.random() * 20; break; } }
+        }
+      } else if ((d.next -= dt) <= 0) {
+        d.next = Array.isArray(p.every) ? range(p.every) : 1e9;
+        if (PILL.n) {
+          const i = Math.floor(Math.random() * PILL.n), cx = PILL.x[i], pw = PILL.w[i];
+          if (cx > 60 && cx < W - 60) { d.mx = cx + (Math.random() < 0.5 ? -1 : 1) * pw * 0.40 + camX * 0.65; d.y = LANE_TOP + 12 - 262 + 12; d.t = range(p.duration); d.acc = 0; }
+        }
+      }
+    },
+    draw: {
+      mid(inst) {
+        const G = inst.d.G;
+        ctx.fillStyle = 'rgb(234, 190, 124)'; ctx.globalAlpha = 0.85 * inst.k;
+        for (let i = 0; i < G.length; i++) { const g = G[i]; if (g.on) ctx.fillRect(g.mx - camX * 0.65, g.y, 1.3, 2.2); }
+        ctx.globalAlpha = 1;
+      }
     }
-    ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  });
+
+  registerAmbient('brazierBreath', {             // the light of each flame pools on the paving and slowly breathes
+    order: 20, defaults: { strength: 1 },
+    draw: {
+      floor(inst) {
+        if (!BAKED.glow) return;
+        const d = inst.d || (inst.d = {}), fx = canvas.width / W, fy = canvas.height / H, r = 112, pw = Math.round(2 * r * fx), ph = Math.round(0.42 * r * fy);
+        let T = d.tex;
+        if (!T || T.width !== pw || T.height !== ph) { T = d.tex = makeCanvas(pw, ph); T.getContext('2d').drawImage(BAKED.glow, 0, 0, pw, ph); }
+        ctx.globalCompositeOperation = 'lighter';
+        for (let i = 0; i < BRAZ.n; i++) {
+          const bx = BRAZ.x[i], fl = BRAZ.f[i];
+          if (bx < -r || bx > W + r) continue;
+          const br = 0.5 + 0.5 * Math.sin(worldTime * 1.7 + i * 2.1);
+          ctx.globalAlpha = Math.max(0, 0.26 + 0.22 * br + fl * 0.016) * inst.p.strength * inst.k;
+          ctx.drawImage(T, Math.round((bx - r + fl * 0.6) * fx) / fx, Math.round((LANE_TOP - 10 - r * 0.15) * fy) / fy, pw / fx, ph / fy);
+        }
+        ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+      }
+    }
+  });
+
+  registerAmbient('embers', {                    // rising sparks (uses the long-standing ember pool)
+    order: 10, defaults: { count: 42 },
+    update(inst, dt) {
+      const n = embers.length;
+      for (let i = 0; i < n; i++) {
+        const em = embers[i];
+        em.x += em.vx * dt * (1 + ENV.gust * 1.3); em.y += em.vy * dt;
+        if (em.x < -20) em.x = W + 20;
+        if (em.y < -20) em.y = H + 20;
+      }
+    },
+    draw: {
+      behind(inst) {
+        const n = Math.min(embers.length, Math.ceil(inst.p.count - 0.001));
+        ctx.fillStyle = 'rgb(255, 195, 85)';
+        for (let i = 0; i < n; i++) { const em = embers[i]; ctx.globalAlpha = em.a * inst.k * Math.min(1, inst.p.count - i); ctx.fillRect(em.x - em.s * 0.7, em.y - em.s * 0.7, em.s * 1.4, em.s * 1.4); }
+        ctx.globalAlpha = 1;
+      }
+    }
+  });
+
+  // ---------------------------------------------------------------- GROUND
+  registerAmbient('footstepDust', {              // a puff on every foot plant and landing (event 'puff' from the actor code)
+    order: 60, defaults: { size: 1, alpha: 1 },
+    start(inst) { inst.d = inst.d || { P: makePuffs(32) }; for (const p of inst.d.P) p.on = false; },
+    update(inst, dt) { puffsUpdate(inst.d.P, dt); },
+    on: { puff(inst, x, z, r, vx, life, a, vr) { puffSpawn(inst.d.P, x, z, r * inst.p.size, vx, life, a * inst.p.alpha, vr == null ? null : vr * inst.p.size); } },
+    draw: { behind(inst) { puffsDraw(inst.d.P, inst.k); } }
+  });
+  registerAmbient('impactShock', {               // ring + dust burst where a heavy attack lands (event 'shock')
+    order: 50, defaults: { size: 1 },
+    start(inst) {
+      const d = inst.d || (inst.d = { P: makePuffs(36), R: [] });
+      if (!d.R.length) for (let i = 0; i < 6; i++) d.R.push({ on: false, x: 0, z: 0, t: 0, max: 0.55, s: 1 });
+      for (const p of d.P) p.on = false; for (const q of d.R) q.on = false;
+    },
+    update(inst, dt) { const d = inst.d; puffsUpdate(d.P, dt); for (let i = 0; i < d.R.length; i++) { const q = d.R[i]; if (q.on && (q.t += dt) >= q.max) q.on = false; } },
+    on: {
+      shock(inst, x, z, s) {
+        const d = inst.d; s *= inst.p.size;
+        for (let i = 0; i < d.R.length; i++) if (!d.R[i].on) { const q = d.R[i]; q.on = true; q.x = x; q.z = z; q.t = 0; q.max = 0.55; q.s = s; break; }
+        for (let k = 0; k < 9; k++) { const a = (k / 9) * Math.PI * 2; puffSpawn(d.P, x + Math.cos(a) * 12 * s, z + Math.sin(a) * 3 * s, 8 * s, Math.cos(a) * 130 * s, 0.65, 0.6, 18 * s); }
+      }
+    },
+    draw: {
+      behind(inst) {
+        const d = inst.d, K = inst.k;
+        for (let i = 0; i < d.R.length; i++) {
+          const q = d.R[i]; if (!q.on) continue;
+          const u = q.t / q.max, e = 1 - Math.pow(1 - u, 3), r = (16 + 84 * e) * q.s;
+          ctx.beginPath(); ctx.ellipse(q.x - camX, q.z, r, r * 0.3, 0, 0, Math.PI * 2);
+          ctx.globalAlpha = 0.45 * (1 - u) * K; ctx.strokeStyle = 'rgb(96, 50, 20)'; ctx.lineWidth = (9 * (1 - u) + 2) * q.s; ctx.stroke();    // dust shadow
+          ctx.globalAlpha = 0.85 * (1 - u) * K; ctx.strokeStyle = 'rgb(244, 206, 146)'; ctx.lineWidth = (5 * (1 - u) + 1) * q.s; ctx.stroke();  // sunlit crest
+        }
+        puffsDraw(d.P, K);
+      }
+    }
+  });
+
+  // ---------------------------------------------------------------- IDLE (actor life: read by the renderer)
+  registerAmbient('idleLife', {                  // breathing, weight shifts, weapon checks, cape in the wind
+    order: 0, defaults: { breath: 1, weaponCheck: 1, capeWind: 1 },
+    stop() { IDLE_FX.k = 0; IDLE_FX.cape = 0; IDLE_FX.check = 0; },
+    update(inst) { const p = inst.p; IDLE_FX.k = inst.k * p.breath; IDLE_FX.check = inst.k * p.weaponCheck; IDLE_FX.cape = inst.k * p.capeWind; }
+  });
+
+  // ================================================================ NEW EFFECTS (no level uses them yet; declared by data)
+  // ---------------------------------------------------------------- torch smoke
+  registerAmbient('torchSmoke', {                // soft smoke rising from torch / brazier anchors, sunlit on the upper-left, bent by the wind
+    order: 30, defaults: { anchors: 'brazier', rate: 4.5, rise: 32, size: 1, alpha: 1, par: 0.65 },
+    bake(mod) {
+      const cv = makeCanvas(64, 64), c = cv.getContext('2d');
+      let g = c.createRadialGradient(32, 32, 1, 32, 32, 30);
+      g.addColorStop(0, 'rgba(92, 62, 44, 0.62)'); g.addColorStop(0.55, 'rgba(84, 56, 40, 0.30)'); g.addColorStop(1, 'rgba(76, 50, 36, 0)');
+      c.fillStyle = g; c.fillRect(0, 0, 64, 64);
+      g = c.createRadialGradient(24, 22, 1, 24, 22, 22);                // lit side, upper-left
+      g.addColorStop(0, 'rgba(236, 178, 118, 0.34)'); g.addColorStop(1, 'rgba(236, 178, 118, 0)');
+      c.fillStyle = g; c.fillRect(0, 0, 64, 64);
+      mod.tex = cv;
+    },
+    start(inst) {
+      const d = inst.d || (inst.d = { P: [], acc: new Float32Array(24) });
+      if (!d.P.length) for (let i = 0; i < 64; i++) d.P.push({ on: false, mx: 0, y: 0, vy: 0, r0: 0, r1: 0, life: 0, max: 1, ph: 0, par: 0.65 });
+      for (const q of d.P) q.on = false; d.acc.fill(0);
+    },
+    update(inst, dt) {
+      const d = inst.d, p = inst.p, P = d.P, pm = QUALITY.particleMul || 1;
+      for (let i = 0; i < P.length; i++) {
+        const q = P[i]; if (!q.on) continue;
+        q.life -= dt; if (q.life <= 0) { q.on = false; continue; }
+        q.y -= q.vy * dt; q.vy *= Math.max(0, 1 - 0.32 * dt); q.mx += ENV.ws * 0.30 * dt;
+      }
+      const A = p.anchors, spawn = (slot, sx, sy, par) => {
+        d.acc[slot] += p.rate * pm * dt;
+        while (d.acc[slot] >= 1) {
+          d.acc[slot] -= 1;
+          for (let i = 0; i < P.length; i++) {
+            const q = P[i]; if (q.on) continue;
+            q.on = true; q.mx = sx + (Math.random() - 0.5) * 7 + camX * par; q.y = sy; q.par = par;
+            q.vy = p.rise * (0.8 + Math.random() * 0.45); q.r0 = (6 + Math.random() * 3) * p.size; q.r1 = (30 + Math.random() * 16) * p.size;
+            q.life = q.max = 2.3 + Math.random() * 1.4; q.ph = Math.random() * 6.28; break;
+          }
+        }
+      };
+      if (A === 'brazier') { for (let i = 0; i < BRAZ.n && i < 24; i++) { const bx = BRAZ.x[i]; if (bx > -60 && bx < W + 60) spawn(i, bx, LANE_TOP - 92, p.par); } }
+      else if (Array.isArray(A)) { for (let i = 0; i < A.length && i < 24; i++) { const a = A[i], par = a.par == null ? p.par : a.par, sx = a.x - camX * par; if (sx > -60 && sx < W + 60) spawn(i, sx, a.y, par); } }
+    },
+    draw: {
+      mid(inst) {
+        const d = inst.d, p = inst.p, P = d.P, T = AFX.torchSmoke.tex;
+        for (let i = 0; i < P.length; i++) {
+          const q = P[i]; if (!q.on) continue;
+          const u = 1 - q.life / q.max, r = q.r0 + (q.r1 - q.r0) * u;
+          const a = (u < 0.14 ? u / 0.14 : Math.pow(1 - (u - 0.14) / 0.86, 1.3)) * 0.62 * p.alpha * inst.k;
+          const x = q.mx - camX * q.par + Math.sin(worldTime * 1.1 + q.ph + u * 2.5) * 7 * u;
+          ctx.globalAlpha = a; ctx.drawImage(T, x - r, q.y - r, r * 2, r * 2);
+        }
+        ctx.globalAlpha = 1;
+      }
+    }
+  });
+
+  // ---------------------------------------------------------------- dust motes
+  registerAmbient('dustMotes', {                 // slow floating lit motes; brighter inside declared light shafts (slanting down-right from the upper-left)
+    order: 30, defaults: { count: 36, fg: 6, alpha: 1, size: 1, yRange: [0.14, 0.9], shafts: null },
+    bake(mod) {
+      let cv = makeCanvas(32, 32), c = cv.getContext('2d');
+      let g = c.createRadialGradient(16, 16, 0, 16, 16, 16);
+      g.addColorStop(0, 'rgba(255, 238, 196, 1)'); g.addColorStop(0.35, 'rgba(255, 214, 150, 0.55)'); g.addColorStop(1, 'rgba(255, 190, 110, 0)');
+      c.fillStyle = g; c.fillRect(0, 0, 32, 32); mod.mote = cv;
+      cv = makeCanvas(64, 256); c = cv.getContext('2d');                   // one light shaft: soft sides, long fade
+      g = c.createLinearGradient(0, 0, 64, 0);
+      g.addColorStop(0, 'rgba(255, 214, 150, 0)'); g.addColorStop(0.28, 'rgba(255, 220, 160, 0.72)'); g.addColorStop(0.5, 'rgba(255, 226, 170, 1)'); g.addColorStop(0.72, 'rgba(255, 220, 160, 0.72)'); g.addColorStop(1, 'rgba(255, 214, 150, 0)');
+      c.fillStyle = g; c.fillRect(0, 0, 64, 256);
+      c.globalCompositeOperation = 'destination-in';
+      g = c.createLinearGradient(0, 0, 0, 256);
+      g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(0.18, 'rgba(0,0,0,0.9)'); g.addColorStop(0.7, 'rgba(0,0,0,0.5)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+      c.fillStyle = g; c.fillRect(0, 0, 64, 256); mod.beam = cv;
+    },
+    start(inst) {
+      const d = inst.d || (inst.d = { M: [] });
+      if (!d.M.length) for (let i = 0; i < 56; i++) d.M.push({ x: Math.random() * (W + 80) - 40, y: Math.random(), d: Math.random(), vx: (Math.random() - 0.5) * 7, vy: (Math.random() - 0.5) * 2.4, ph: Math.random() * 6.28, a: 0.2 + Math.random() * 0.25, r: 1.1 + Math.random() * 1.5 });
+    },
+    update(inst, dt) {
+      const M = inst.d.M, ws = ENV.ws, dc = ENV.dc, yr = inst.p.yRange;
+      for (let i = 0; i < M.length; i++) {
+        const m = M[i];
+        m.x += (m.vx + ws * 0.05) * dt - dc * (0.5 + m.d * 0.6); m.y += m.vy * dt / H;
+        if (m.x < -40) m.x += W + 80; else if (m.x > W + 40) m.x -= W + 80;
+        if (m.y < 0 || m.y > 1) m.y = Math.random();
+      }
+    },
+    draw: {
+      behind(inst) {
+        const d = inst.d, p = inst.p, mod = AFX.dustMotes, n = Math.min(56, Math.round(p.count * (QUALITY.particleMul || 1))), fgN = Math.round(p.fg), t = worldTime;
+        const S = Array.isArray(p.shafts) ? p.shafts : null;
+        if (S) {                                                         // the shafts themselves (additive, gently breathing)
+          ctx.globalCompositeOperation = 'lighter';
+          for (let s = 0; s < S.length && s < 5; s++) {
+            const sh = S[s], par = sh.par == null ? 0.65 : sh.par, w = sh.w || 90, len = sh.len || 300, ang = sh.angle == null ? 0.42 : sh.angle;
+            ctx.globalAlpha = Math.min(1, (sh.alpha == null ? 0.28 : sh.alpha) * 1.8 * inst.k * p.alpha * (0.82 + 0.18 * Math.sin(t * 0.45 + s * 2.1)));
+            ctx.save(); ctx.translate(sh.x - camX * par, sh.top || 0); ctx.rotate(-ang); ctx.drawImage(mod.beam, -w / 2, 0, w, len); ctx.restore();
+          }
+          ctx.globalCompositeOperation = 'source-over';
+        }
+        ctx.globalCompositeOperation = 'lighter';
+        const y0 = p.yRange[0] * H, yh = (p.yRange[1] - p.yRange[0]) * H;
+        for (let i = fgN; i < n; i++) {
+          const m = d.M[i], y = y0 + m.y * yh + Math.sin(t * 0.5 + m.ph) * 6, x = m.x + Math.sin(t * 0.37 + m.ph * 1.7) * 4;
+          const boost = S ? shaftBoost(S, x, y, camX) : 0.35;
+          const a = m.a * (0.55 + 0.45 * Math.sin(t * 1.7 + m.ph)) * (S ? 0.28 + 1.5 * boost : 1) * inst.k * p.alpha, r = m.r * p.size * (0.7 + m.d * 0.6) * (1 + boost * 0.5) * 3;
+          if (a < 0.01) continue;
+          ctx.globalAlpha = Math.min(1, a); ctx.drawImage(mod.mote, x - r, y - r, r * 2, r * 2);
+        }
+        ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+      },
+      front(inst) {
+        const d = inst.d, p = inst.p, mod = AFX.dustMotes, fgN = Math.min(16, Math.round(p.fg)), t = worldTime;
+        const y0 = p.yRange[0] * H, yh = (p.yRange[1] - p.yRange[0]) * H;
+        ctx.globalCompositeOperation = 'lighter';
+        for (let i = 0; i < fgN; i++) {
+          const m = d.M[i], y = y0 + m.y * yh + Math.sin(t * 0.5 + m.ph) * 6, x = m.x + Math.sin(t * 0.37 + m.ph * 1.7) * 4;
+          if (y < 120 || y > LANE_BOT - 4 || nearFighter(x, y)) continue;
+          const r = m.r * p.size * 4.2;
+          ctx.globalAlpha = Math.min(0.2, m.a * (0.5 + 0.5 * Math.sin(t * 1.3 + m.ph)) * 0.6) * inst.k * p.alpha;
+          ctx.drawImage(mod.mote, x - r, y - r, r * 2, r * 2);
+        }
+        ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+      }
+    }
+  });
+  function shaftBoost(S, x, y, cam) {                                    // 0..1: how deep inside a declared light shaft the point is
+    let b = 0;
+    for (let s = 0; s < S.length && s < 5; s++) {
+      const sh = S[s], par = sh.par == null ? 0.65 : sh.par, w = sh.w || 90, len = sh.len || 300, ang = sh.angle == null ? 0.42 : sh.angle;
+      const rx = x - (sh.x - cam * par), ry = y - (sh.top || 0), sn = Math.sin(ang), cs = Math.cos(ang);
+      const along = rx * sn + ry * cs, perp = rx * cs - ry * sn;
+      if (along < 0 || along > len) continue;
+      const v = 1 - Math.abs(perp) / (w * 0.5 * (0.7 + 0.5 * along / len)); if (v > b) b = v;
+    }
+    return b > 0 ? Math.min(1, b * 1.4) : 0;
   }
 
-
-  // --- ground layer (behind every fighter): embers, sand, footstep puffs, shockwaves ---
-  function drawAmbientGround() {
-    const A = AMB;
-    ctx.fillStyle = 'rgb(255, 195, 85)';
-    for (const em of embers) { ctx.globalAlpha = em.a; ctx.fillRect(em.x - em.s * 0.7, em.y - em.s * 0.7, em.s * 1.4, em.s * 1.4); }
-    const n = Math.round(A.sand.length * (QUALITY.particleMul || 1));
-    const y0 = LANE_TOP - 46, yh = H - y0 - 4, st = 1 + A.gust * 1.6;
-    ctx.fillStyle = 'rgb(240, 204, 146)';
+  // ---------------------------------------------------------------- water shimmer
+  registerAmbient('waterShimmer', {              // glinting animated ripples on declared water regions/bands (world x, y as a fraction of the playfield)
+    order: 10, defaults: { region: { y0: 0.05, y1: 0.45 }, glints: 1, ripple: 1, alpha: 1 },
+    start(inst) {
+      const d = inst.d || (inst.d = { R: [], G: [], acc: 0 });
+      if (!d.G.length) for (let i = 0; i < 40; i++) d.G.push({ on: false, wx: 0, y: 0, w: 8, life: 0, max: 1, par: 1 });
+      for (const g of d.G) g.on = false; d.R.length = 0;
+    },
+    update(inst, dt) {
+      const d = inst.d, p = inst.p, G = d.G, regs = Array.isArray(p.region) ? p.region : [p.region], pm = QUALITY.particleMul || 1;
+      for (let i = 0; i < G.length; i++) { const g = G[i]; if (g.on && (g.life -= dt) <= 0) g.on = false; else if (g.on) g.wx += ENV.ws * 0.03 * dt; }
+      for (let ri = 0; ri < regs.length && ri < 3; ri++) {
+        const r = regs[ri], par = r.par == null ? 1 : r.par, x0 = r.x0 == null ? 0 : r.x0 - camX * par, x1 = r.x1 == null ? W : r.x1 - camX * par;
+        const vx0 = Math.max(0, x0), vx1 = Math.min(W, x1); if (vx1 <= vx0) continue;
+        d.acc += dt * 16 * p.glints * pm * (vx1 - vx0) / W * (regs.length > 1 ? 0.6 : 1);
+        while (d.acc >= 1) {
+          d.acc -= 1;
+          for (let i = 0; i < G.length; i++) {
+            const g = G[i]; if (g.on) continue;
+            const f = Math.pow(Math.random(), 0.8), y0 = LANE_TOP + r.y0 * (H - LANE_TOP), y1 = LANE_TOP + r.y1 * (H - LANE_TOP);
+            g.on = true; g.par = par; g.wx = vx0 + Math.random() * (vx1 - vx0) + camX * par; g.y = y0 + f * (y1 - y0);
+            g.w = (6 + Math.random() * 12) * (0.55 + 0.9 * f); g.life = g.max = 0.7 + Math.random() * 0.9; break;
+          }
+        }
+      }
+    },
+    draw: {
+      floor(inst) {
+        const d = inst.d, p = inst.p, regs = Array.isArray(p.region) ? p.region : [p.region], fx = canvas.width / W, fy = canvas.height / H, t = worldTime, A = p.alpha * inst.k;
+        for (let ri = 0; ri < regs.length && ri < 3; ri++) {
+          const r = regs[ri], par = r.par == null ? 1 : r.par;
+          const wx0 = r.x0 == null ? camX * par : r.x0, wx1 = r.x1 == null ? camX * par + W : r.x1;
+          const y0 = Math.round(LANE_TOP + r.y0 * (H - LANE_TOP)), y1 = Math.round(LANE_TOP + r.y1 * (H - LANE_TOP));
+          const x0 = wx0 - camX * par, x1 = wx1 - camX * par, vx0 = Math.max(0, x0), vx1 = Math.min(W, x1);
+          if (vx1 <= vx0 || y1 <= y0) continue;
+          const rw = Math.min(1800, Math.round(wx1 - wx0)), rh = y1 - y0, tw = Math.round(rw * fx), th = Math.round(rh * fy), key = tw + 'x' + th;
+          let R = d.R[ri];
+          if (!R || R.key !== key) { R = d.R[ri] = { key, tex: bakeWaterTex(tw, th, fx, fy) }; PERF_SKIP = true; }
+          ctx.globalAlpha = A;
+          const sxs = (vx0 - x0) * fx, sw = Math.min(tw - sxs, (vx1 - vx0) * fx);
+          if (sw > 1) for (let y = y0; y < y1; y += 4) {                    // ripple: 4 px strips drift sideways, more toward the viewer
+            const k = (y - y0) / rh, off = (Math.sin(t * 1.5 + y * 0.31 + k * 4) * 1.3 + Math.sin(t * 2.7 - y * 0.17) * 0.7) * (0.35 + 0.65 * k) * p.ripple;
+            ctx.drawImage(R.tex, sxs, (y - y0) * fy, sw, 4 * fy, vx0 + off, y, sw / fx, 4);
+          }
+        }
+        ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = 'rgb(255, 224, 168)';
+        const G = d.G;
+        for (let i = 0; i < G.length; i++) {                                // pale gold glints: lenses that swell and die
+          const g = G[i]; if (!g.on) continue;
+          const u = 1 - g.life / g.max, e = Math.sin(Math.PI * u), x = g.wx - camX * g.par;
+          if (x < -20 || x > W + 20) continue;
+          ctx.globalAlpha = 0.75 * e * A; ctx.beginPath(); ctx.ellipse(x, g.y, g.w * (0.4 + 0.6 * e), 0.9 + g.w * 0.07, 0, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+      }
+    }
+  });
+  function bakeWaterTex(tw, th, fx, fy) {
+    const cv = makeCanvas(Math.max(2, tw), Math.max(2, th)), c = cv.getContext('2d'), r = seeded(tw * 31 + th);
+    let g = c.createLinearGradient(0, 0, 0, th);                         // burning sky in the water: amber at the far edge, copper then dark umber near
+    g.addColorStop(0, 'rgba(255, 192, 118, 0.62)'); g.addColorStop(0.35, 'rgba(176, 78, 36, 0.62)'); g.addColorStop(1, 'rgba(44, 17, 12, 0.76)');
+    c.fillStyle = g; c.fillRect(0, 0, tw, th);
+    const n = Math.round(tw * th / (900 * fx * fy));                     // horizontal ripple streaks, thinner toward the horizon
     for (let i = 0; i < n; i++) {
-      const p = A.sand[i]; if (p.fg) continue;
-      ctx.globalAlpha = p.a * (0.75 + 0.5 * A.gust);
-      ctx.fillRect(p.x, y0 + p.d * yh + Math.sin(worldTime * 1.3 + p.ph) * 4, p.len * st, 0.8 + p.d * 0.9);
+      const f = Math.pow(r(), 0.9), y = f * th, len = (18 + r() * 70) * fx * (0.5 + f), x = r() * tw, light = r() < 0.58;
+      c.fillStyle = light ? `rgba(255, 220, 160, ${0.26 + 0.34 * r()})` : `rgba(40, 14, 10, ${0.22 + 0.30 * r()})`;
+      c.fillRect(x, y, len, (0.8 + 1.7 * f) * fy);
     }
-    for (let i = 0; i < A.rings.length; i++) {
-      const q = A.rings[i]; if (!q.on) continue;
-      const u = q.t / q.max, e = 1 - Math.pow(1 - u, 3), r = (16 + 84 * e) * q.s;
-      ctx.beginPath(); ctx.ellipse(q.x - camX, q.z, r, r * 0.3, 0, 0, Math.PI * 2);
-      ctx.globalAlpha = 0.45 * (1 - u); ctx.strokeStyle = 'rgb(96, 50, 20)'; ctx.lineWidth = (9 * (1 - u) + 2) * q.s; ctx.stroke();   // dust shadow
-      ctx.globalAlpha = 0.85 * (1 - u); ctx.strokeStyle = 'rgb(244, 206, 146)'; ctx.lineWidth = (5 * (1 - u) + 1) * q.s; ctx.stroke(); // sunlit crest
-    }
-    for (let i = 0; i < A.puffs.length; i++) {
-      const p = A.puffs[i]; if (!p.on) continue;
-      ctx.globalAlpha = p.a * (p.life / p.max);
-      ctx.drawImage(A.puffTex, p.x - camX - p.r, p.z - p.r * 0.8, p.r * 2, p.r * 1.1);
-    }
-    ctx.globalAlpha = 1;
+    c.globalCompositeOperation = 'destination-in';                       // feather all four edges into the paving
+    const ex = Math.min(tw * 0.18, 26 * fx), ey = Math.min(th * 0.3, 14 * fy);
+    g = c.createLinearGradient(0, 0, tw, 0); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(ex / tw, 'rgba(0,0,0,1)'); g.addColorStop(1 - ex / tw, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    c.fillStyle = g; c.fillRect(0, 0, tw, th);
+    g = c.createLinearGradient(0, 0, 0, th); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(ey / th, 'rgba(0,0,0,1)'); g.addColorStop(1 - ey / th, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    c.fillStyle = g; c.fillRect(0, 0, tw, th);
+    return cv;
   }
-  // a few faint foreground streaks: never over a fighter, never in the HUD rows
-  function nearFighter(x, y) {
-    if (Math.abs(x - (player.x - camX)) < 46 && y > player.z - player.y - 150 && y < player.z + 10) return true;
-    for (let i = 0; i < enemies.length; i++) {
-      const e = enemies[i], s = e.scale || 1;
-      if (Math.abs(x - (e.x - camX)) < 46 * s && y > e.z - (e.y || 0) - 140 * s && y < e.z + 10) return true;
+
+  // ---------------------------------------------------------------- dragonflies
+  registerAmbient('dragonflies', {               // darting flyers: hover with a micro-buzz, then a quick dart to a new spot
+    order: 40, defaults: { count: 6, size: 1, yRange: [0.46, 0.72], alpha: 1 },
+    start(inst) {
+      const d = inst.d || (inst.d = { F: [] });
+      if (!d.F.length) for (let i = 0; i < 12; i++) d.F.push({ x: Math.random() * W, y: 0.5, sx: 0, sy: 0, tx: 0, ty: 0, t: 0, dur: 0.15, st: 0, hover: Math.random() * 1.5, ph: Math.random() * 6.28, dir: Math.random() < 0.5 ? -1 : 1 });
+      const yr = inst.p.yRange; for (const f of d.F) f.y = (yr[0] + Math.random() * (yr[1] - yr[0])) * H;
+    },
+    update(inst, dt) {
+      const F = inst.d.F, yr = inst.p.yRange, y0 = yr[0] * H, y1 = yr[1] * H, dc = ENV.dc * 0.9;
+      for (let i = 0; i < F.length; i++) {
+        const f = F[i];
+        f.x -= dc; f.sx -= dc; f.tx -= dc;
+        if (f.st === 0) {
+          if ((f.hover -= dt) <= 0) {
+            let dx = (60 + Math.random() * 110) * (Math.random() < 0.5 ? -1 : 1); if (f.x + dx < 30 || f.x + dx > W - 30) dx = -dx;
+            f.sx = f.x; f.sy = f.y; f.tx = f.x + dx; f.ty = Math.max(y0, Math.min(y1, f.y + (Math.random() - 0.5) * 70));
+            f.t = 0; f.dur = 0.12 + Math.random() * 0.12; f.st = 1; f.dir = dx < 0 ? -1 : 1;
+          }
+        } else {
+          f.t += dt; const u = Math.min(1, f.t / f.dur), e = 1 - Math.pow(1 - u, 3);
+          f.x = f.sx + (f.tx - f.sx) * e; f.y = f.sy + (f.ty - f.sy) * e;
+          if (u >= 1) { f.st = 0; f.hover = 0.5 + Math.random() * 1.7; }
+        }
+        if (f.x < -80 || f.x > W + 80 || f.y < y0 - 30 || f.y > y1 + 30) { f.x = Math.random() * W; f.y = y0 + Math.random() * (y1 - y0); f.st = 0; f.hover = 0.3 + Math.random(); }
+      }
+    },
+    draw: {
+      behind(inst) {
+        const F = inst.d.F, p = inst.p, n = Math.min(12, Math.ceil(p.count * (QUALITY.particleMul || 1) - 0.001)), t = worldTime;
+        ctx.lineCap = 'round';
+        for (let i = 0; i < n; i++) {
+          const f = F[i], s = p.size * (0.7 + 0.6 * (f.y / H)), dart = f.st === 1;
+          const x = f.x + (dart ? 0 : Math.sin(t * 9 + f.ph) * 0.8), y = f.y + (dart ? 0 : Math.sin(t * 6.5 + f.ph * 1.3) * 1.3 + Math.sin(t * 1.1 + f.ph) * 1.5), dr = f.dir;
+          ctx.globalAlpha = Math.min(1, p.count - i) * inst.k * p.alpha;
+          ctx.strokeStyle = 'rgb(122, 52, 20)'; ctx.lineWidth = 1.25 * s;                        // body: tail, thorax, head
+          ctx.beginPath(); ctx.moveTo(x - dr * 8.5 * s, y + 0.8 * s); ctx.lineTo(x - dr * 1.2 * s, y); ctx.stroke();
+          ctx.fillStyle = 'rgb(138, 62, 24)'; ctx.beginPath(); ctx.arc(x, y, 1.5 * s, 0, 6.2832); ctx.fill();
+          ctx.beginPath(); ctx.arc(x + dr * 2.0 * s, y - 0.2 * s, 1.15 * s, 0, 6.2832); ctx.fill();
+          ctx.fillStyle = 'rgb(255, 214, 140)'; ctx.fillRect(x - 0.9 * s, y - 1.3 * s, 0.9 * s, 0.8 * s);    // sun glint, upper-left
+          const buzz = Math.sin(t * 64 + f.ph) * 0.4, wa = dart ? 0.25 : 0.9;                         // four glassy wings, buzzing
+          ctx.fillStyle = 'rgb(255, 236, 178)'; ctx.globalAlpha *= dart ? 0.22 : (0.26 + 0.1 * Math.sin(t * 47 + f.ph));
+          for (let w = 0; w < 4; w++) {
+            const side = w < 2 ? 1 : -1, hind = w & 1, ang = -dr * (0.5 + hind * 0.35) * 0.4 - side * (wa + buzz) * 0.55;
+            ctx.beginPath(); ctx.ellipse(x - dr * (0.4 + hind * 0.8) * s, y - 0.6 * s - side * 0.4 * s, (hind ? 3.4 : 3.8) * s, 0.95 * s, ang + (side > 0 ? -0.5 : 0.5), 0, 6.2832); ctx.fill();
+          }
+        }
+        ctx.globalAlpha = 1;
+      }
     }
-    return false;
-  }
-  function drawAmbientFront() {
-    const A = AMB, y0 = LANE_TOP - 46, yh = H - y0 - 4, st = 1 + A.gust * 1.6;
-    ctx.fillStyle = 'rgb(246, 214, 160)';
-    for (let i = 0; i < A.sand.length; i++) {
-      const p = A.sand[i]; if (!p.fg) continue;
-      const y = y0 + p.d * yh + Math.sin(worldTime * 1.3 + p.ph) * 4, L = p.len * st * 1.6;
-      if (y < 120 || y > LANE_BOT - 4 || nearFighter(p.x + L / 2, y)) continue;
-      ctx.globalAlpha = Math.min(0.30, p.a); ctx.fillRect(p.x, y, L, 1.3);
-    }
-    ctx.globalAlpha = 1;
-  }
+  });
 
   // --- idle life: torso breathing / weight shift / weapon check, MzCookie's cape in the wind ---
-  const IDLE_O = { br: 0, rot: 0, hx: 0, cape: false, wd: 1 };
+  const IDLE_O = { br: 0, rot: 0, hx: 0, cape: false, cs: 0, wd: 1 };
   function idleParams(seed, isMz, facing) {
-    const t = worldTime + seed * 3.7;
+    if (IDLE_FX.k < 0.004 && IDLE_FX.cape < 0.004) return null;   // level declares no idle life
+    const t = worldTime + seed * 3.7, K = IDLE_FX.k;
     const s = Math.sin(t * 1.14 + seed);                          // weight shift, ~5.5 s
-    let br = 0.013 * Math.sin(t * 2.5), rot = 0.013 * s;
+    let br = 0.013 * Math.sin(t * 2.5) * K, rot = 0.013 * s * K;
     const u = (t + seed * 5.3) % 8.5;                              // weapon check every 8.5 s
-    if (u < 0.9) { const e = Math.sin(Math.PI * u / 0.9); rot -= 0.05 * e; br += 0.008 * e; }
-    IDLE_O.br = br; IDLE_O.rot = rot; IDLE_O.hx = 1.3 * s; IDLE_O.cape = isMz; IDLE_O.wd = facing >= 0 ? 1 : -1;
+    if (u < 0.9) { const e = Math.sin(Math.PI * u / 0.9) * IDLE_FX.check; rot -= 0.05 * e; br += 0.008 * e; }
+    IDLE_O.br = br; IDLE_O.rot = rot; IDLE_O.hx = 1.3 * s * K; IDLE_O.cape = isMz && IDLE_FX.cape > 0.004; IDLE_O.cs = IDLE_FX.cape; IDLE_O.wd = facing >= 0 ? 1 : -1;
     return IDLE_O;
   }
   const CAPE = { x1: 0.35, y0: 0.36, y1: 0.95, rows: 14 };
   function capeRows(img, sx, sy, sw, sh, dx, dy, dw, dh, I, upper) {
-    const yc = 0.5, rows = CAPE.rows, rh = (CAPE.y1 - CAPE.y0) / rows, t = worldTime, g = AMB.gust;
-    const A = dw * 0.07;
+    const yc = 0.5, rows = CAPE.rows, rh = (CAPE.y1 - CAPE.y0) / rows, t = worldTime, g = ENV.gust;
+    const A = dw * 0.07 * I.cs;
     for (let j = 0; j < rows; j++) {
       const f0 = CAPE.y0 + j * rh;
       if (upper ? f0 >= yc : f0 < yc) continue;
@@ -2660,7 +3181,7 @@
         if (tick !== vis.tick) {
           vis.tick = tick;
           const k = drawH / 124;
-          spawnPuff(x - facing * dir * 9 * k, z, (5 + (dustSize || 2.4)) * k, -facing * dir * 20, 0.6, 0.55);
+          ambientEmit('puff', x - facing * dir * 9 * k, z, (5 + (dustSize || 2.4)) * k, -facing * dir * 20, 0.6, 0.55);
         }
         vis.tick = tick;
       }
@@ -3597,7 +4118,7 @@
     }
 
     drawBackground();
-    drawAmbientGround();
+    ambientDraw('behind');
 
     // Depth-sorted entities (Urns, Pickups, Player, Enemies) — pooled, allocation-free
     RLs.length = 0; RLn = 0;
@@ -3621,7 +4142,7 @@
         drawHero(player.x, player.z, player.y, player.facing, player.active, player.state, player.animT, player.invuln);
       }
     }
-    drawAmbientFront();
+    ambientDraw('front');
 
     // Painted Weapon Smear Arcs
     ctx.save();
@@ -3724,7 +4245,7 @@
   bakeAmbient();
   resize();
   window.addEventListener('resize', resize);
-  initAmbient();
+  ambientSync(true);
 
   let lastT = performance.now();
   function loop(now) {
