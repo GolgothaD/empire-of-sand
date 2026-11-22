@@ -22,6 +22,7 @@
 <meta name="theme-color" content="#0d0705"><link rel="manifest" href="manifest.json"><link rel="icon" href="favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png"><link rel="apple-touch-icon" href="icons/apple-touch-icon.png"></head>
 <body>
 <canvas id="game"></canvas>
+<script src="version.js"></script>
 <script>
 (() => {
   'use strict';
@@ -894,7 +895,7 @@
   //  behind  dragonflies        count 6 (max 12), size 1, yRange [0.46,0.72]
   //  behind  footstepDust       size 1, alpha 1                 (default on: a puff per foot plant / landing)
   //  behind  impactShock        size 1                          (default on: ring + dust where a heavy blow lands)
-  //  (none)  wind               dir -1 (right to left), strength 1, gustEvery [2.5,5] s (false = no gusts; the first gust arrives ~2.4 s after a start), gustStrength 1
+  //  (none)  wind               dir -1 (right to left), strength 1, gustEvery [7,11] s after each 3.4 s gust (false = no gusts; the first gust arrives ~2.4 s after a start), gustStrength 1
   //  (none)  idleLife           breath 1, weaponCheck 1, capeWind 1   (default on: actors are never statues)
   // Layers: sky = painted sky band; far = behind the haze; mid = colonnade depth; floor = on the paving;
   // behind = play depth, behind every fighter; front = foreground-safe (the engine keeps it off fighters and the HUD).
@@ -902,7 +903,7 @@
   // =========================================================================
   const WORLD_LEN = 3600;
   const COLONNADE_AMBIENT = {
-    wind: { dir: -1, strength: 1, gustEvery: [2.5, 5] },
+    wind: { dir: -1, strength: 1, gustEvery: [7, 11] },
     sandDrift: { count: 64, fg: 10 },
     dustDevils: { every: [45, 85], first: 6 },
     heatShimmer: { horizon: true, braziers: true, strength: 1 },
@@ -933,7 +934,7 @@
       lockX: 1260,                                                  // (was 1680: every later trigger moves with zone I by the same 420, spacing unchanged)
       ambient: {                                                    // open dunes: a harder wind, more sand, dust devils, a caravan, bare pillars
         ...COLONNADE_AMBIENT,
-        wind: { dir: -1, strength: 1.5, gustEvery: [2.5, 5.5], gustStrength: 1.4 },
+        wind: { dir: -1, strength: 1.5, gustEvery: [7, 10.5], gustStrength: 1.4 },
         sandDrift: { count: 92, fg: 14 },
         dustDevils: { every: [18, 36], first: 4, size: 1.15 },
         heatShimmer: { horizon: true, braziers: true, strength: 1.3 },
@@ -956,7 +957,7 @@
       boss: true,                                                  // finale: skip LEVEL CLEAR and go to the victory screen
       ambient: {                                                    // boss arena: still air, vultures gathering, a quicker vortex, rising smoke and embers
         ...COLONNADE_AMBIENT,
-        wind: { dir: -1, strength: 0.8, gustEvery: [3, 7], gustStrength: 1.2 },
+        wind: { dir: -1, strength: 0.8, gustEvery: [7, 11], gustStrength: 1.2 },
         sandDrift: { count: 40, fg: 8 },
         dustDevils: false,
         caravans: false,
@@ -1672,7 +1673,10 @@
         for (const u of urns) {
           if (u.broken) continue;
           const dx = (u.x - hx) * player.facing;
-          if (dx >= -20 && dx <= reach && Math.abs(u.z - player.z) < 42) {
+          // v14: depth test follows what the eye sees, not the enemy rule. The urn is ~60 px tall and the blade passes ~70 px above the hero's feet,
+          // so a swing from the lane BELOW (hero nearer the camera, larger z) still crosses the pot's body up to ~84 px of depth away; from behind it is 52.
+          const dzs = player.z - u.z;
+          if (dx >= -28 && dx <= reach + 8 && dzs > -52 && dzs < 84) {
             u.broken = true; u.brokeT = worldTime;
             AudioFX.shatter();
             spawnParticles(u.x, u.z - 22, 14, '#c77c40', 190, 4.5);
@@ -1966,7 +1970,49 @@
   const SKY_PAR = 0.08;
   const SUN = { x: 250, y: 90 };
   const FAR_PAR = 0.12;
-  // far vista geometry: uniform scale (never stretched), wide enough for the whole camera range at FAR_PAR
+  // v14: the horizon ruins are NOT painted into bg_far.webp any more (the painted colonnades were pale, blurry and
+  // read as ghosts). bg_far now holds sky/pyramids/dunes only; the far colonnades are opaque pillar sprites (the same
+  // art as the mid-ground pillar) composited into ONE offscreen copy of the picture, so the heat-haze strips ripple
+  // pyramids and pillars together. Positions are in bg_far pixel coordinates (2400 x 461).
+  const FAR_RUINS = (function () {
+    const out = [], ridge = (x, a) => { for (let i = 1; i < a.length; i++) if (x <= a[i][0]) return a[i - 1][1] + (a[i][1] - a[i - 1][1]) * (x - a[i - 1][0]) / (a[i][0] - a[i - 1][0]); return a[a.length - 1][1]; };
+    const rA = [[392, 241], [470, 243], [530, 247], [602, 253]];
+    // [x, height, fraction broken off the top]; one group per ruined colonnade, mirrored about the picture's seams
+    const A = [[408, 62, 0], [426, 72, 0], [446, 88, 0], [464, 94, 0], [482, 96, 0], [500, 92, 0], [518, 84, 0], [534, 62, .30], [549, 50, .38], [563, 38, .5], [575, 28, .5]];
+    const B = [[1650, 36, .35], [1666, 50, 0], [1684, 60, 0], [1702, 66, 0], [1720, 70, 0], [1738, 66, 0], [1756, 56, .2], [1774, 66, 0], [1790, 74, 0]];
+    A.forEach(c => { out.push({ x: c[0], y: ridge(c[0], rA), h: c[1], cut: c[2] }); const x2 = 1200 - c[0]; out.push({ x: x2, y: ridge(1200 - x2, rA), h: c[1], cut: c[2] }); });
+    B.forEach(c => { out.push({ x: c[0], y: 284, h: c[1], cut: c[2] }); out.push({ x: 3600 - c[0], y: 284, h: c[1], cut: c[2] }); });
+    return out;
+  })();
+  // stone beams over the intact runs: [x0, x1, y of the beam top]; the second of each pair is the mirror image
+  const FAR_LINTELS = [[459, 505, 243 - 95 - 3], [1200 - 505, 1200 - 459, 243 - 95 - 3], [1697, 1743, 284 - 69 - 3], [3600 - 1743, 3600 - 1697, 284 - 69 - 3]];
+  let farComposite = null;
+  function ensureFarComposite() {
+    if (farComposite || !IMG.pyramids || !IMG.pyramids.naturalWidth || !IMG.pillar || !IMG.pillar.naturalWidth) return;
+    const src = IMG.pyramids, iw = src.naturalWidth, ih = src.naturalHeight;
+    const cv = makeCanvas(iw, ih), c = cv.getContext('2d');
+    c.drawImage(src, 0, 0);
+    c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+    const pil = IMG.pillar, sw = 56, sh = Math.round(sw * pil.naturalHeight / pil.naturalWidth);   // two-step downscale keeps the small columns crisp
+    const small = makeCanvas(sw, sh); const sc2 = small.getContext('2d'); sc2.imageSmoothingEnabled = true; sc2.imageSmoothingQuality = 'high'; sc2.drawImage(pil, 0, 0, sw, sh);
+    // read as solid shaded stone against the bright sky: darker body + cylindrical shading (shadow side left, warm lit edge right)
+    sc2.globalCompositeOperation = 'source-atop';
+    sc2.fillStyle = 'rgba(48,20,6,0.52)'; sc2.fillRect(0, 0, sw, sh);
+    const sg = sc2.createLinearGradient(0, 0, sw, 0); sg.addColorStop(0, 'rgba(20,6,0,0.70)'); sg.addColorStop(0.55, 'rgba(24,8,2,0.08)'); sg.addColorStop(1, 'rgba(255,196,120,0.18)');
+    sc2.fillStyle = sg; sc2.fillRect(0, 0, sw, sh);
+    sc2.globalCompositeOperation = 'source-over';
+    const ruins = FAR_RUINS.slice().sort((a, b) => a.y - b.y);
+    const col = r => { const w = r.h * 0.23, cutPx = r.cut * sh; c.drawImage(small, 0, cutPx, sw, sh - cutPx, Math.round(r.x - w / 2), r.y - r.h * (1 - r.cut), w, r.h * (1 - r.cut)); };
+    // contact shadows first, then columns, then beams
+    c.fillStyle = 'rgba(40,18,6,0.35)'; ruins.forEach(r => c.fillRect(Math.round(r.x - r.h * 0.17), r.y - 1, r.h * 0.34, 3));
+    ruins.forEach(col);
+    FAR_LINTELS.forEach(L => {
+      const g = c.createLinearGradient(0, L[2], 0, L[2] + 6); g.addColorStop(0, '#8a5326'); g.addColorStop(0.5, '#5e3516'); g.addColorStop(1, '#35200c');
+      c.fillStyle = g; c.fillRect(L[0], L[2], L[1] - L[0], 6);
+    });
+    farComposite = cv; cv.naturalWidth = iw; cv.naturalHeight = ih;
+    IMG.pyramids = cv;
+  }
   function farGeom() {
     const im = IMG.pyramids, asp = im.naturalWidth / im.naturalHeight;
     const camMax = Math.max(0, WORLD_LEN - W), travel = FAR_PAR * camMax;
@@ -1977,6 +2023,7 @@
   const HORIZ = { amp: 0, y0: 0, hb: 44 };   // horizon heat-haze state, set by the heatShimmer module each frame
   function drawBackground() {
     const skyH = LANE_TOP + 12;
+    ensureFarComposite();
 
     // 1. Painted fire-vortex sky: ONE cover-fit image (never tiled), parallax 0.08. It is scaled so that the
     //    whole camera range (0 .. WORLD_LEN-W) still lands inside the picture, so no edge or repeat can show.
@@ -2024,7 +2071,7 @@
         for (let r = 0; r < HBd; r += spd) {
           const h = Math.min(spd, HBd - r), y = (hyd + r) / fy, k = r / HBd;
           if (y + h / fy <= fg.y || y >= fg.y + fg.h) continue;
-          const dx = (Math.sin(t * 2.0 + y * 0.30) * 0.7 + Math.sin(t * 3.6 - y * 0.55) * 0.3) * (0.30 + 0.70 * k) * 2.2 * HORIZ.amp;
+          const dx = (Math.sin(t * 5.2 + y * 0.26) * 0.7 + Math.sin(t * 8.4 - y * 0.47) * 0.3) * (0.45 + 0.55 * k) * 6.0 * HORIZ.amp;   // v14: ~+-6 px at 1x, 5 Hz-ish: reads as heat on a phone
           const sy = (y - fg.y) / fg.h * ih, sh = (h / fy) / fg.h * ih;
           ctx.drawImage(IMG.pyramids, 0, sy, iw, sh, fg.x + Math.round(dx * fx) / fx, y, fg.w, h / fy);
         }
@@ -2180,7 +2227,7 @@
     g.addColorStop(0, 'rgba(255, 190, 120, 0)'); g.addColorStop(1, 'rgba(255, 175, 100, 0.26)');
     GRAD.haze2 = g;
     g = ctx.createLinearGradient(0, LANE_TOP - 70, 0, LANE_TOP + 32);
-    g.addColorStop(0, 'rgba(255, 165, 65, 0)'); g.addColorStop(0.55, 'rgba(255, 140, 45, 0.20)'); g.addColorStop(1, 'rgba(255, 110, 30, 0)');
+    g.addColorStop(0, 'rgba(255, 165, 65, 0)'); g.addColorStop(0.55, 'rgba(255, 140, 45, 0.13)'); g.addColorStop(1, 'rgba(255, 110, 30, 0)');
     GRAD.horizon = g;
     g = ctx.createLinearGradient(0, LANE_TOP + 10, 0, LANE_TOP + 100);
     g.addColorStop(0, 'rgba(255, 196, 130, 0.12)'); g.addColorStop(1, 'rgba(255, 196, 130, 0)');
@@ -2541,12 +2588,12 @@
 
   // ---------------------------------------------------------------- AIR
   registerAmbient('wind', {                      // field: wind speed + gusts every [a,b] seconds; read by drift, cloth, smoke, cape
-    order: 0, defaults: { dir: -1, strength: 1, gustEvery: [2.5, 5], gustStrength: 1 },
-    start(inst) { inst.d = inst.d || {}; const d = inst.d; d.gust = 0; d.gustT = 2.4; d.age = 0; d.on = false; },
+    order: 0, defaults: { dir: -1, strength: 1, gustEvery: [7, 11], gustStrength: 1 },
+    start(inst) { inst.d = inst.d || {}; const d = inst.d; d.gust = 0; d.gustT = 4; d.age = 0; d.on = false; d.S = []; d.n = 0; },
     stop() { ENV.ws = 0; ENV.gust = 0; },
     update(inst, dt) {
       const d = inst.d, p = inst.p;
-      if (!d.on) { if (Array.isArray(p.gustEvery) && (d.gustT -= dt) <= 0) { d.on = true; d.age = 0; } }
+      if (!d.on) { if (Array.isArray(p.gustEvery) && (d.gustT -= dt) <= 0) { d.on = true; d.age = 0; d.n++; windGustBurst(d); } }
       else {
         d.age += dt; const u = d.age / 3.4;                          // 3.4 s swell
         d.gust = u >= 1 ? 0 : Math.pow(Math.sin(Math.PI * u), 2);
@@ -2554,8 +2601,42 @@
       }
       ENV.dir = p.dir; ENV.gust = d.gust * p.gustStrength * inst.k;
       ENV.ws = p.dir * (38 + 230 * d.gust * p.gustStrength) * p.strength * inst.k;
+      ENV.gustN = d.n;
+    },
+    // gustEvery is the pause AFTER a 3.4 s gust, so onset-to-onset = 3.4 + [7,11] = 10.4-14.4 s.
+    // v14: a gust is a VISIBLE event. The old streaks were sand-coloured on sand-coloured floor and moved with the breeze, so a gust
+    // read as nothing. Now every gust (on a 10-14 s timer, not by chance) launches a burst of long, fast streaks - bright dust and dark
+    // grit, so they show on both sky and floor - across the whole screen in the wind direction, with a faint dust veil under them.
+    draw: {
+      front(inst) {
+        const d = inst.d, p = inst.p; if (!d.on || !d.S.length) return;
+        const g = ENV.gust, a0 = d.age, dir = p.dir < 0 ? -1 : 1, K = inst.k;
+        ctx.save();
+        ctx.globalAlpha = Math.min(0.22, 0.20 * g) * K;
+        const vg = ctx.createLinearGradient(0, LANE_TOP - 90, 0, LANE_TOP + 50); vg.addColorStop(0, 'rgba(232,172,104,0)'); vg.addColorStop(1, 'rgb(232,172,104)');
+        ctx.fillStyle = vg; ctx.fillRect(0, LANE_TOP - 90, W, 140);
+        ctx.fillStyle = 'rgb(232, 172, 104)'; ctx.fillRect(0, LANE_TOP + 50, W, H - LANE_TOP - 50);                                       // dust veil
+        for (let i = 0; i < d.S.length; i++) {
+          const q = d.S[i], u = a0 - q.t0; if (u < 0) continue;
+          const x = dir < 0 ? W + 80 - q.sp * u : -80 + q.sp * u; if (x < -q.len - 90 || x > W + q.len + 90) continue;
+          const y = q.y + Math.sin(a0 * 2.4 + q.ph) * 3, e = Math.min(1, Math.max(0, g * 2.2));
+          const xs = dir < 0 ? x : x - q.len;
+          ctx.globalAlpha = q.a * e * K; ctx.fillStyle = q.dark ? 'rgb(96, 52, 22)' : 'rgb(255, 236, 196)';
+          ctx.fillRect(xs, y, q.len, q.th);
+          if (!q.dark) { ctx.globalAlpha = Math.min(1, q.a * 1.35) * e * K; ctx.fillRect(dir < 0 ? xs : xs + q.len * 0.55, y, q.len * 0.45, q.th); }
+        }
+        ctx.restore();
+      }
     }
   });
+  function windGustBurst(d) {
+    const n = Math.round(78 * (QUALITY.particleMul || 1)); d.S.length = 0;
+    const y0 = LANE_TOP - 64, y1 = H - 6;
+    for (let i = 0; i < n; i++) {
+      const dark = Math.random() < 0.34, ph = Math.random();
+      d.S.push({ t0: Math.random() * 2.1, y: y0 + Math.random() * (y1 - y0), len: 70 + Math.random() * 190, sp: 1050 + Math.random() * 850, th: 1.3 + Math.random() * 2.1, a: dark ? 0.30 + 0.25 * ph : 0.55 + 0.35 * ph, dark, ph: Math.random() * 6.28 });
+    }
+  }
 
   registerAmbient('sandDrift', {                 // wind-blown sand streaks (behind fighters) + a few faint foreground streaks
     order: 20, defaults: { count: 64, fg: 10, alpha: 1 },
@@ -2663,10 +2744,10 @@
           const sx = slot * 60 * fx; slot++;
           c.globalCompositeOperation = 'copy';
           c.drawImage(canvas, Math.round((bx - BW / 2) * fx), Math.round(top * fy), Math.round(BW * fx), Math.round(BB * fy), sx, sy, Math.round(BW * fx), Math.round(BB * fy));
-          for (let y = top; y < bot; y += 8) {
+          for (let y = top; y < bot; y += 4) {      // v14: 4 px strips with a slow phase gradient: adjacent strips differ by < 1 px, so the pillar behind a flame is no longer cut into bands
             const k = (y - top) / (bot - top), wv = 14 + 14 * k;
-            const dx = Math.sin(t * 6.2 - y * 0.24 + i * 1.9) * 2.8 * (0.35 + 0.65 * k) * amp;
-            ctx.drawImage(S, sx + (BW / 2 - wv) * fx, sy + (y - top) * fy, 2 * wv * fx, 8 * fy, bx - wv + dx, y, 2 * wv, 8);
+            const dx = Math.sin(t * 6.2 - y * 0.10 + i * 1.9) * 2.3 * (0.35 + 0.65 * k) * amp;
+            ctx.drawImage(S, sx + (BW / 2 - wv) * fx, sy + (y - top) * fy, 2 * wv * fx, 4 * fy, bx - wv + dx, y, 2 * wv, 4);
           }
         }
       }
@@ -2853,16 +2934,18 @@
     ctx.beginPath(); ctx.moveTo(x + dir * 0.35 * s, y); ctx.lineTo(x + dir * 0.28 * s, y - 2.0 * s); ctx.stroke();   // staff
   }
   registerAmbient('caravans', {                  // a camel caravan and a lone walker crossing the horizon, never interacting
-    order: 20, defaults: { speed: 1, lone: true, start: 800, loneStart: 760 },
-    start(inst) { const d = inst.d || (inst.d = {}); d.s = worldTime * 6 * inst.p.speed; d.s2 = worldTime * 4.5 * inst.p.speed; },
-    update(inst, dt) { const d = inst.d, sp = inst.p.speed; d.s += 6 * sp * dt; d.s2 += 4.5 * sp * dt; },
+    order: 20, defaults: { speed: 1, lone: true, start: 800, loneStart: 760, drift: 15 },
+    // v14: the crossing ran at 6 px/s (a camel body-length in 4 s): it moved, but too slowly to read as movement on a phone.
+    // drift is now the caravan's speed in logical px/s (right -> left); the lone walker goes the other way at 0.75 of it.
+    start(inst) { const d = inst.d || (inst.d = {}); d.s = worldTime * inst.p.drift * inst.p.speed; d.s2 = worldTime * inst.p.drift * 0.75 * inst.p.speed; },
+    update(inst, dt) { const d = inst.d, sp = inst.p.speed, dr = inst.p.drift; d.s += dr * sp * dt; d.s2 += dr * 0.75 * sp * dt; },
     draw: {
       far(inst) {
         const d = inst.d, p = inst.p, t = worldTime, hy = LANE_TOP - 13, s = Math.max(7, H * 0.019);
         ctx.lineCap = 'round'; ctx.fillStyle = ctx.strokeStyle = 'rgb(84, 38, 18)'; ctx.globalAlpha = 0.88 * inst.k;
-        const cyc = W + 1100, cx = ((p.start - d.s - camX * FAR_PAR) % cyc + cyc) % cyc - 300;
+        const cyc = W + 520, cx = ((p.start - d.s - camX * FAR_PAR) % cyc + cyc) % cyc - 300;
         if (cx > -8 * s && cx < W + 4 * s) {
-          const ph = t * 2.6 * p.speed;
+          const ph = t * 3.4 * p.speed;
           drawCamel(cx, hy, s, ph, true);
           drawCamel(cx + 2.5 * s, hy, s * 0.95, ph + 1.3, false);
           drawCamel(cx + 5.0 * s, hy, s * 0.9, ph + 2.4, true);
@@ -2907,7 +2990,7 @@
     },
     draw: {
       mid(inst) {
-        const p = inst.p, T = AFX.banners.tex, N = 12, t = worldTime, g = ENV.gust, ev = Math.max(1, Math.round(p.every)), ph = 262;
+        const p = inst.p, T = AFX.banners.tex, N = 22, t = worldTime, g = ENV.gust, ev = Math.max(1, Math.round(p.every)), ph = 262;
         ctx.globalAlpha = inst.k;
         for (let n = 0; n < PILL.n; n++) {
           if (((PILL.i[n] % ev) + ev) % ev !== p.phase) continue;
@@ -2916,9 +2999,13 @@
             const f0 = j / N, f = (j + 0.5) / N;
             const sway = p.sway * Math.pow(f, 1.2) * (Math.sin(t * 2.6 + f * 3.8 + seed * 1.7) * (4.2 + 2.6 * g)
                        + Math.sin(t * 5.6 + f * 7 + seed) * 1.4 * (0.5 + g) + ENV.dir * (2.5 + 5 * g));
-            const sx0 = cx - w / 2 + sway, sy0 = top + f0 * h, sh0 = h / N + 0.7;
-            ctx.drawImage(T, 0, f0 * T.height, T.width, T.height / N + 1, sx0, sy0, w, sh0);
-            const fold = Math.sin(t * 3.4 - f * 8.5 + seed * 2.3) * (0.7 + 0.3 * g);   // cloth fold travelling down the banner
+            // v14: a real travelling wave down the cloth (about 1.4 waves over its length, +-4 px at rest, more in a gust), anchored at the rod,
+            // with the cloth narrowing a little on the crest of each fold like a flag
+            const wave = Math.sin(t * 3.1 - f * 8.8 + seed * 2.1), wv = (0.3 + 0.7 * Math.pow(f, 0.7)) * (4.2 + 3.2 * g) * wave * p.sway;
+            const ww = w * (1 - 0.05 * Math.abs(wave) * f);
+            const sx0 = cx - ww / 2 + sway + wv, sy0 = top + f0 * h, sh0 = h / N + 0.7;
+            ctx.drawImage(T, 0, f0 * T.height, T.width, T.height / N + 1, sx0, sy0, ww, sh0);
+            const fold = wave * (0.75 + 0.25 * g);   // cloth fold travelling down the banner
             ctx.fillStyle = fold > 0 ? 'rgb(255, 196, 126)' : 'rgb(24, 6, 2)';
             ctx.globalAlpha = Math.abs(fold) * (fold > 0 ? 0.20 : 0.30) * inst.k; ctx.fillRect(sx0, sy0, w, sh0);
             ctx.globalAlpha = inst.k;
@@ -3329,21 +3416,21 @@
     const t = worldTime + seed * 3.7, K = IDLE_FX.k;
     const s = Math.sin(t * 1.14 + seed);                          // weight shift, ~5.5 s
     const bs = Math.sin(t * 2.1);                                  // breathing, ~3 s per breath
-    let br = 0.034 * bs * K, rot = 0.022 * s * K;
+    let br = 0.078 * bs * K, rot = 0.032 * s * K;      // v14: breathing 0.034 -> 0.078 (chest rises ~4 px), sway 0.022 -> 0.032
     const u = (t + seed * 5.3) % 8.5;                              // weapon check every 8.5 s
     if (u < 0.9) { const e = Math.sin(Math.PI * u / 0.9) * IDLE_FX.check; rot -= 0.07 * e; br += 0.014 * e; }
-    IDLE_O.br = br; IDLE_O.rot = rot; IDLE_O.hx = 2.2 * s * K; IDLE_O.dy = -1.6 * bs * K; IDLE_O.cape = isMz && IDLE_FX.cape > 0.004; IDLE_O.cs = IDLE_FX.cape; IDLE_O.wd = facing >= 0 ? 1 : -1;
+    IDLE_O.br = br; IDLE_O.rot = rot; IDLE_O.hx = 3.2 * s * K; IDLE_O.dy = -2.8 * bs * K; IDLE_O.cape = isMz && IDLE_FX.cape > 0.004; IDLE_O.cs = IDLE_FX.cape; IDLE_O.wd = facing >= 0 ? 1 : -1;
     return IDLE_O;
   }
   const CAPE = { x1: 0.35, y0: 0.36, y1: 0.95, rows: 14 };
   function capeRows(img, sx, sy, sw, sh, dx, dy, dw, dh, I, upper) {
     const yc = 0.5, rows = CAPE.rows, rh = (CAPE.y1 - CAPE.y0) / rows, t = worldTime, g = ENV.gust;
-    const A = dw * 0.12 * I.cs;
+    const A = dw * 0.17 * I.cs;      // v14: 0.12 -> 0.17 so the cape edge visibly moves while standing
     for (let j = 0; j < rows; j++) {
       const f0 = CAPE.y0 + j * rh;
       if (upper ? f0 >= yc : f0 < yc) continue;
       const k = Math.pow((f0 + rh * 0.5 - CAPE.y0) / (CAPE.y1 - CAPE.y0), 1.4);
-      const d = A * k * (0.55 * Math.sin(t * 1.9 - f0 * 9) + 0.25 * Math.sin(t * 3.4 - f0 * 15) + I.wd * (0.45 + 0.9 * g));
+      const d = A * k * (0.62 * Math.sin(t * 2.5 - f0 * 9) + 0.30 * Math.sin(t * 4.2 - f0 * 15) + I.wd * (0.45 + 0.9 * g));
       ctx.drawImage(img, sx, sy + f0 * sh, sw * CAPE.x1, sh * rh + 1, dx - d, dy + f0 * dh, dw * CAPE.x1 + d, dh * rh + 0.6);
     }
   }
@@ -3353,7 +3440,7 @@
     ctx.drawImage(base, sx, sy + ys, sw, sh - ys, dx, dy + yd, dw, dh - yd);      // planted legs
     if (cape) capeRows(img, sx, sy, sw, sh, dx, dy, dw, dh, I, false);
     ctx.save();
-    ctx.translate(I.hx, dy + yd + I.dy); ctx.rotate(I.rot); ctx.scale(1, 1 + I.br); ctx.translate(0, -(dy + yd));
+    ctx.translate(I.hx, dy + yd + I.dy); ctx.rotate(I.rot); ctx.scale(1 + 0.4 * I.br, 1 + I.br); ctx.translate(0, -(dy + yd));
     ctx.drawImage(base, sx, sy, sw, ys + 4 * sh / dh, dx, dy, dw, yd + 4);          // torso, pivot at the waist (4px overlap hides the seam while it breathes)
     if (cape) capeRows(img, sx, sy, sw, sh, dx, dy, dw, dh, I, true);
     ctx.restore();
@@ -4423,6 +4510,9 @@
       ctx.fillStyle = '#e8c99a'; ctx.font = '13px sans-serif';
       ctx.fillText('KB: WASD Move | J Atk | K Heavy | Space Jump | L Dash | Q Swap | U Fury', W * 0.5, H * 0.85);
       ctx.fillText('XBOX: Stick Move | X Atk | Y Heavy | A Jump | B Dash | LB/RB Swap | LT/RT Fury', W * 0.5, H * 0.90);
+      // build label: the ONE version constant (version.js), the same one sw.js builds its cache name from
+      ctx.fillStyle = 'rgba(232, 201, 154, 0.7)'; ctx.font = '12px sans-serif';
+      ctx.fillText('BETA BUILD v' + (typeof EMPIRE_VERSION === 'string' ? EMPIRE_VERSION : '?'), W * 0.5, H * 0.955);
     } else {
       // Victory plaque (the finale skips LEVEL CLEAR so this is the only end card)
       const ready = SCREEN.lock <= 0;
